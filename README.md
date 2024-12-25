@@ -6,3 +6,26 @@ cargo test <MODULE NAME> -- --nocapture
 Example:
 cargo test node_manager -- --nocapture
 ```
+
+## Next Milestones:
+- Milestone 1:
+    - Write crude code to respond to Leader election request. Always accept the leader for time being.
+    - Run 3 pods with above code
+    - Check if all the three pods
+        - can communicate with each other over UDP
+        - accept one of the pod as a leader
+        - change their state as follower  
+
+- Milestone 2: Collision cases
+    - When should a node be considered a leader?
+        - after all the nodes accept?
+        - or when majority of nodes accept?
+    - How many times leader election should happen? infinitely?
+
+- Milestone 3:
+    - Find out if Kafka has 
+        - leader per Topic?
+        - leader per partition?
+- Milestone 4:
+    - Implement WAL
+    - Make WAL persisting to underlying storage
