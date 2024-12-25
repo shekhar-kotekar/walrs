@@ -1,0 +1,23 @@
+FROM docker.io/library/rust:alpine3.20 AS builder
+
+RUN rustup default stable
+RUN apk add --no-cache musl-dev libpq gcc
+
+ARG module_name=core
+
+WORKDIR /${module_name}
+COPY Cargo.toml Cargo.lock /${module_name}/
+COPY . ./
+RUN echo $(ls -ltrh /${module_name})
+
+RUN cargo test && cargo build --release
+
+RUN echo $(ls -ltrh /${module_name}/target/release/)
+
+FROM scratch
+ARG module_name=core
+
+COPY --from=builder /${module_name}/target/release/kraft-rs /kraft-rs
+COPY ./configs/ /configs/
+
+CMD [ "/kraft-rs" ]

@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kraft-rs
+  labels:
+    name: kraft-rs
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kraft-rs-service
+  namespace: kraft-rs
+  labels:
+    app: kraft-rs-service
+spec:
+  clusterIP: None
+  selector:
+    app: kraft-rs-service
+  ports:
+    - protocol: TCP
+      port: 5056
+      targetPort: 5056
