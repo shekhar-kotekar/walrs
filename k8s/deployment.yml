@@ -20,8 +20,6 @@ spec:
       - name: kraftrs
         image: localhost:5001/kraft_rs:latest
         env:
-        # - name: CONFIG_FILE_PATH
-        #   value: "/configs/node_1_config.toml"
         - name: POD_IP
           valueFrom:
             fieldRef:
