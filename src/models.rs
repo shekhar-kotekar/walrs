@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -31,19 +32,7 @@ pub enum NodeState {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Cluster {
-    pub current_node: Node,
-    pub other_nodes: Vec<Node>,
-    pub lealder: Option<Node>,
-}
-
-impl Cluster {
-    pub fn new() -> Self {
-        Cluster {
-            current_node: Node::new(None),
-            other_nodes: vec![],
-            lealder: None,
-        }
-    }
+    pub nodes: Vec<Node>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -52,6 +41,7 @@ pub struct Node {
     pub ip_address: String,
     pub state: NodeState,
     pub term: u64,
+    pub is_local: bool,
 }
 
 impl Node {
@@ -61,12 +51,36 @@ impl Node {
             state: NodeState::Follower,
             ip_address: ip_address.unwrap_or_else(|| "".to_string()),
             term: 0,
+            is_local: false,
         }
     }
     pub fn next_candidate(&mut self) {
         self.state = NodeState::Candidate;
         self.term += 1;
     }
+}
+
+pub enum ClusterStateQuery {
+    GetClusterState {
+        tx: oneshot::Sender<Cluster>,
+    },
+    GetLeader {
+        tx: oneshot::Sender<Option<Node>>,
+    },
+    GetLocalNode {
+        tx: oneshot::Sender<Node>,
+    },
+    GetOtherNodes {
+        tx: oneshot::Sender<Vec<Node>>,
+    },
+    UpdateNodeState {
+        node_id: Uuid,
+        new_state: NodeState,
+        tx: oneshot::Sender<bool>,
+    },
+    NominateLocalNodeAsLeader {
+        tx: oneshot::Sender<u64>,
+    },
 }
 
 #[cfg(test)]
@@ -79,16 +93,5 @@ mod tests {
         assert_eq!(node.state, NodeState::Follower);
         assert_eq!(node.ip_address, "");
         assert_eq!(node.term, 0);
-    }
-
-    #[test]
-    fn test_cluster_new() {
-        let cluster = Cluster {
-            current_node: Node::new(None),
-            other_nodes: vec![],
-            lealder: None,
-        };
-        assert_eq!(cluster.other_nodes.len(), 0);
-        assert_eq!(cluster.lealder, None);
     }
 }

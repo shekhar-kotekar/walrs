@@ -1,10 +1,12 @@
 use common::enable_tracing;
-use models::{Cluster, ClusterMessage, Node, NodeState};
+use models::{Cluster, ClusterMessage, ClusterStateQuery, Node, NodeState};
 use std::{process::Command, thread, time::Duration};
 use tokio::io::AsyncReadExt;
+use tokio::sync::mpsc;
 use tokio::{net::TcpListener, signal};
 use tokio_util::{bytes::BytesMut, sync::CancellationToken, task::TaskTracker};
 
+mod cluster_state_keeper;
 mod common;
 mod models;
 mod node_manager;
@@ -14,6 +16,7 @@ const MAX_RETRIES: u8 = 30;
 const SLEEP_TIME_IN_SECONDS: u64 = 3;
 const MAIN_PORT: u32 = 5056;
 const K8S_SERVICE_NAME: &str = "kraft-rs-service";
+const MPSC_MAX_Q_SIZE: usize = 100;
 
 #[tokio::main]
 async fn main() {
@@ -24,9 +27,23 @@ async fn main() {
 
     let cluster_info: Cluster = get_cluster_info();
 
+    let cluster_state_keeper_cancellation_token = cancellation_token.clone();
+    let (cluster_state_keeper_tx, cluster_state_keeper_rx) =
+        mpsc::channel::<ClusterStateQuery>(MPSC_MAX_Q_SIZE);
+
+    task_tracker.spawn(async move {
+        cluster_state_keeper::maintain_cluster_state(
+            cluster_info,
+            cluster_state_keeper_rx,
+            cluster_state_keeper_cancellation_token,
+        )
+        .await;
+    });
+
     let node_manager_cancellation_token = cancellation_token.clone();
     task_tracker.spawn(async move {
-        node_manager::start_node_manager(cluster_info, node_manager_cancellation_token).await;
+        node_manager::start_node_manager(cluster_state_keeper_tx, node_manager_cancellation_token)
+            .await;
     });
 
     let receiver_cancellation_token = cancellation_token.clone();
@@ -73,13 +90,13 @@ fn get_cluster_info() -> Cluster {
         ip_address: pod_ip,
         state: NodeState::Follower,
         term: 0,
+        is_local: true,
     };
     tracing::info!("Current Node: {:?}", current_node);
-    let other_nodes_in_cluster: Vec<Node> = wait_until_nodes_are_added_to_cluster();
+    let mut nodes_in_cluster: Vec<Node> = wait_until_nodes_are_added_to_cluster();
+    nodes_in_cluster.push(current_node);
     Cluster {
-        current_node,
-        other_nodes: other_nodes_in_cluster,
-        lealder: None,
+        nodes: nodes_in_cluster,
     }
 }
 

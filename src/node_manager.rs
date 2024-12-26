@@ -1,24 +1,52 @@
 use std::{sync::Arc, time::Duration};
 
-use tokio::{net::UdpSocket, time::interval};
+use tokio::{
+    net::UdpSocket,
+    sync::{mpsc::Sender, oneshot},
+    time::interval,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    models::{Answer, Cluster, ClusterMessage},
+    models::{Answer, ClusterMessage, ClusterStateQuery, Node},
     SLEEP_TIME_IN_SECONDS,
 };
 
 const NODE_MANAGER_PORT: u32 = 5057;
 
-pub async fn start_node_manager(cluster: Cluster, cancellation_token: CancellationToken) {
+pub async fn start_node_manager(
+    state_keeper_tx: Sender<ClusterStateQuery>,
+    cancellation_token: CancellationToken,
+) {
     let mut interval_timer = interval(Duration::from_millis(SLEEP_TIME_IN_SECONDS));
     let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
     let arc_socket = Arc::new(socket);
 
     let socket_for_leadership_request = arc_socket.clone();
-    if cluster.lealder.is_none() {
-        tracing::info!("No leader found in the cluster.");
-        send_request_for_leadership(cluster.clone(), socket_for_leadership_request).await;
+
+    let (oneshot_tx, oneshot_rx) = oneshot::channel::<Option<Node>>();
+    let query = ClusterStateQuery::GetLeader { tx: oneshot_tx };
+    state_keeper_tx.send(query).await.unwrap();
+    match oneshot_rx.await.unwrap() {
+        Some(leader) => {
+            tracing::info!("Leader found in the cluster: {:?}", leader);
+        }
+        None => {
+            tracing::info!("No leader found in the cluster.");
+
+            let (oneshot_tx, oneshot_rx) = oneshot::channel::<Node>();
+            let query = ClusterStateQuery::GetLocalNode { tx: oneshot_tx };
+            state_keeper_tx.send(query).await.unwrap();
+            let local_node = oneshot_rx.await.unwrap();
+
+            let (oneshot_tx, oneshot_rx) = oneshot::channel::<Vec<Node>>();
+            let query = ClusterStateQuery::GetOtherNodes { tx: oneshot_tx };
+            state_keeper_tx.send(query).await.unwrap();
+            let other_nodes = oneshot_rx.await.unwrap();
+
+            send_request_for_leadership(socket_for_leadership_request, local_node, other_nodes)
+                .await;
+        }
     }
 
     tokio::spawn(async move {
@@ -35,6 +63,7 @@ pub async fn start_node_manager(cluster: Cluster, cancellation_token: Cancellati
                                 match received_message {
                                     ClusterMessage::VoteRequest(node) => {
                                         tracing::info!("Received vote request from node: {:?}", node);
+
                                     }
                                     ClusterMessage::VoteResponse {node, answer} => {
                                         tracing::info!("Received vote response from node");
@@ -63,7 +92,11 @@ pub async fn start_node_manager(cluster: Cluster, cancellation_token: Cancellati
                     }
                 }
                 _ = interval_timer.tick() => {
-                    send_heartbeat(cluster.clone());
+                    let (oneshot_tx, oneshot_rx) = oneshot::channel::<Vec<Node>>();
+                    let query = ClusterStateQuery::GetOtherNodes { tx: oneshot_tx };
+                    state_keeper_tx.send(query).await.unwrap();
+                    let other_nodes = oneshot_rx.await.unwrap();
+                    send_heartbeat(other_nodes);
                 }
                 _ = cancellation_token.cancelled() => {
                     tracing::info!("Node manager shutting down!");
@@ -74,12 +107,16 @@ pub async fn start_node_manager(cluster: Cluster, cancellation_token: Cancellati
     });
 }
 
-async fn send_request_for_leadership(cluster: Cluster, socket: Arc<UdpSocket>) {
-    let mut current_node = cluster.current_node.clone();
-    current_node.next_candidate();
-    tracing::info!("Nominating this node {:?} as a leader.", current_node);
-    let message_to_send = bincode::serialize(&ClusterMessage::VoteRequest(current_node)).unwrap();
-    for node in cluster.other_nodes.iter() {
+async fn send_request_for_leadership(
+    socket: Arc<UdpSocket>,
+    mut local_node: Node,
+    other_nodes: Vec<Node>,
+) {
+    local_node.next_candidate();
+    tracing::info!("Nominating {:?} as a leader.", local_node);
+    let message_to_send = bincode::serialize(&ClusterMessage::VoteRequest(local_node)).unwrap();
+
+    for node in other_nodes.iter() {
         tracing::info!("Sending vote request to node: {:?}", node);
         let destination = format!("{}:{}", node.ip_address, NODE_MANAGER_PORT);
         socket
@@ -89,12 +126,12 @@ async fn send_request_for_leadership(cluster: Cluster, socket: Arc<UdpSocket>) {
     }
     tracing::info!(
         "Vote request sent to {} nodes in the cluster.",
-        cluster.other_nodes.len()
+        other_nodes.len()
     );
 }
 
-fn send_heartbeat(cluster: Cluster) {
-    for node in cluster.other_nodes {
+fn send_heartbeat(other_nodes_in_cluster: Vec<Node>) {
+    for node in other_nodes_in_cluster {
         tracing::info!("Sending heartbeat to node: {:?}", node);
     }
 }
@@ -108,13 +145,10 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn test_node_should_be_able_to_send_request_for_leadership() {
-        let other_node = Node::new(Some("0.0.0.0".to_string()));
+        let other_node_1 = Node::new(Some("0.0.0.0".to_string()));
+        let other_node_2 = Node::new(Some("0.0.0.0".to_string()));
+
         let current_node = Node::new(Some("0.0.0.0".to_string()));
-        let cluster = Cluster {
-            current_node,
-            other_nodes: vec![other_node],
-            lealder: None,
-        };
 
         let socket = UdpSocket::bind(format!("0.0.0.0:{}", NODE_MANAGER_PORT))
             .await
@@ -122,7 +156,12 @@ mod tests {
         let arc_socket = Arc::new(socket);
         let arc_socket_clone = arc_socket.clone();
         tokio::spawn(async move {
-            send_request_for_leadership(cluster, arc_socket_clone).await;
+            send_request_for_leadership(
+                arc_socket_clone,
+                current_node,
+                vec![other_node_1, other_node_2],
+            )
+            .await;
         });
 
         let mut buffer = [0u8; 2048];
