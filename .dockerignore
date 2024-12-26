@@ -3,4 +3,7 @@ Dockerfile
 target/
 .git/
 .gitignore
+.dockerignore
 k8s/
+README.md
+*.yml
