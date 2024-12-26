@@ -9,7 +9,7 @@ cargo test node_manager -- --nocapture
 
 ## Next Milestones:
 - Milestone 1:
-    - Write crude code to respond to Leader election request. Always accept the leader for time being.
+    - [x] Write crude code to respond to Leader election request. Always accept the leader for time being
     - Run 3 pods with above code
     - Check if all the three pods
         - can communicate with each other over UDP

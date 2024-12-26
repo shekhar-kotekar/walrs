@@ -12,10 +12,9 @@ use crate::{
     SLEEP_TIME_IN_SECONDS,
 };
 
-const NODE_MANAGER_PORT: u32 = 5057;
-
 pub async fn start_node_manager(
     state_keeper_tx: Sender<ClusterStateQuery>,
+    node_manager_port: u32,
     cancellation_token: CancellationToken,
 ) {
     let mut interval_timer = interval(Duration::from_millis(SLEEP_TIME_IN_SECONDS));
@@ -44,8 +43,13 @@ pub async fn start_node_manager(
             state_keeper_tx.send(query).await.unwrap();
             let other_nodes = oneshot_rx.await.unwrap();
 
-            send_request_for_leadership(socket_for_leadership_request, local_node, other_nodes)
-                .await;
+            send_request_for_leadership(
+                socket_for_leadership_request,
+                local_node,
+                other_nodes,
+                node_manager_port,
+            )
+            .await;
         }
     }
 
@@ -111,6 +115,7 @@ async fn send_request_for_leadership(
     socket: Arc<UdpSocket>,
     mut local_node: Node,
     other_nodes: Vec<Node>,
+    node_manager_port: u32,
 ) {
     local_node.next_candidate();
     tracing::info!("Nominating {:?} as a leader.", local_node);
@@ -118,7 +123,7 @@ async fn send_request_for_leadership(
 
     for node in other_nodes.iter() {
         tracing::info!("Sending vote request to node: {:?}", node);
-        let destination = format!("{}:{}", node.ip_address, NODE_MANAGER_PORT);
+        let destination = format!("{}:{}", node.ip_address, node_manager_port);
         socket
             .send_to(&message_to_send, destination)
             .await
@@ -153,7 +158,8 @@ mod tests {
 
         let current_node = Node::new(Some("0.0.0.0".to_string()));
 
-        let socket = UdpSocket::bind(format!("0.0.0.0:{}", NODE_MANAGER_PORT))
+        let node_manager_port = 5056;
+        let socket = UdpSocket::bind(format!("0.0.0.0:{}", node_manager_port))
             .await
             .unwrap();
         let arc_socket = Arc::new(socket);
@@ -163,6 +169,7 @@ mod tests {
                 arc_socket_clone,
                 current_node,
                 vec![other_node_1, other_node_2],
+                node_manager_port,
             )
             .await;
         });

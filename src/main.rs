@@ -12,15 +12,18 @@ mod models;
 mod node_manager;
 
 // TODO: Read all the constants from a config file
+const MAIN_PORT: u32 = 5056;
+const NODE_MANAGER_PORT: u32 = 5057;
+
 const MAX_RETRIES: u8 = 30;
 const SLEEP_TIME_IN_SECONDS: u64 = 3;
-const MAIN_PORT: u32 = 5056;
 const K8S_SERVICE_NAME: &str = "kraft-rs-service";
 const MPSC_MAX_Q_SIZE: usize = 100;
 
 #[tokio::main]
 async fn main() {
     enable_tracing();
+    console_subscriber::init();
 
     let task_tracker = TaskTracker::new();
     let cancellation_token = CancellationToken::new();
@@ -42,8 +45,12 @@ async fn main() {
 
     let node_manager_cancellation_token = cancellation_token.clone();
     task_tracker.spawn(async move {
-        node_manager::start_node_manager(cluster_state_keeper_tx, node_manager_cancellation_token)
-            .await;
+        node_manager::start_node_manager(
+            cluster_state_keeper_tx,
+            NODE_MANAGER_PORT,
+            node_manager_cancellation_token,
+        )
+        .await;
     });
 
     let receiver_cancellation_token = cancellation_token.clone();
