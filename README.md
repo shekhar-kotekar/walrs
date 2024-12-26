@@ -10,9 +10,9 @@ cargo test node_manager -- --nocapture
 ## Next Milestones:
 - Milestone 1:
     - [x] Write crude code to respond to Leader election request. Always accept the leader for time being
-    - Run 3 pods with above code
+    - [x] Run 3 pods with above code
     - Check if all the three pods
-        - can communicate with each other over UDP
+        - [x] can communicate with each other over UDP
         - accept one of the pod as a leader
         - change their state as follower  
 
