@@ -37,7 +37,7 @@ pub struct Cluster {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Node {
-    pub id: Uuid,
+    pub id: Option<Uuid>,
     pub ip_address: String,
     pub state: NodeState,
     pub term: u64,
@@ -47,7 +47,7 @@ pub struct Node {
 impl Node {
     pub fn new(ip_address: Option<String>) -> Self {
         Node {
-            id: Uuid::new_v4(),
+            id: None,
             state: NodeState::Follower,
             ip_address: ip_address.unwrap_or_default(),
             term: 0,

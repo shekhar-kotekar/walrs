@@ -92,25 +92,25 @@ async fn main() {
 fn get_cluster_info() -> Cluster {
     let pod_uid = std::env::var("POD_UID").unwrap();
     let pod_ip: String = std::env::var("POD_IP").unwrap();
+
+    let mut nodes_in_cluster: Vec<Node> = wait_until_nodes_are_added_to_cluster(&pod_ip.as_str());
     let current_node = Node {
-        id: uuid::Uuid::parse_str(&pod_uid).unwrap(),
+        id: Some(uuid::Uuid::parse_str(&pod_uid).unwrap()),
         ip_address: pod_ip,
         state: NodeState::Follower,
         term: 0,
         is_local: true,
     };
-    tracing::info!("Current Node: {:?}", current_node);
-    let mut nodes_in_cluster: Vec<Node> = wait_until_nodes_are_added_to_cluster();
     nodes_in_cluster.push(current_node);
     Cluster {
         nodes: nodes_in_cluster,
     }
 }
 
-fn wait_until_nodes_are_added_to_cluster() -> Vec<Node> {
+fn wait_until_nodes_are_added_to_cluster(pod_ip: &str) -> Vec<Node> {
     let mut try_count = 0;
     loop {
-        let nodes: Vec<Node> = dig_cluster_nodes(K8S_SERVICE_NAME);
+        let nodes: Vec<Node> = dig_cluster_nodes(K8S_SERVICE_NAME, pod_ip);
         if nodes.is_empty() {
             try_count += 1;
             if try_count >= MAX_RETRIES {
@@ -132,7 +132,7 @@ fn wait_until_nodes_are_added_to_cluster() -> Vec<Node> {
     }
 }
 
-fn dig_cluster_nodes(service_name: &str) -> Vec<Node> {
+fn dig_cluster_nodes(service_name: &str, pod_ip: &str) -> Vec<Node> {
     let output = Command::new("dig")
         .args(["+short", "+search", service_name])
         .output()
@@ -143,7 +143,7 @@ fn dig_cluster_nodes(service_name: &str) -> Vec<Node> {
         output
             .split("\n")
             .map(|ip| ip.trim().to_string())
-            .filter(|ip| !ip.is_empty())
+            .filter(|ip| !ip.is_empty() && ip != pod_ip)
             .map(|node_ip| Node::new(Some(node_ip)))
             .collect()
     } else {

@@ -29,7 +29,7 @@ pub async fn maintain_cluster_state(
                         tx.send(other_nodes_in_cluster).unwrap();
                     }
                     ClusterStateQuery::UpdateNodeState {node_id, new_state, tx} => {
-                        match cluster.nodes.iter_mut().find(|node| node.id == node_id) {
+                        match cluster.nodes.iter_mut().find(|node| node.id.is_some_and(|id| id == node_id)) {
                             Some(node) => {
                                 node.state = new_state;
                                 tracing::info!("Node state updated successfully!");
@@ -77,7 +77,13 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn test_cluster_state_keeper_should_be_able_to_update_the_leader() {
-        let one_node = Node::new(Some("127.0.0.0".to_string()));
+        let one_node = Node {
+            id: Some(Uuid::new_v4()),
+            ip_address: "127.0.0.0".to_string(),
+            state: NodeState::Follower,
+            term: 0,
+            is_local: true,
+        };
         let cluster = Cluster {
             nodes: vec![one_node.clone()],
         };
@@ -89,7 +95,7 @@ mod tests {
 
         let (oneshot_tx, oneshot_rx) = oneshot::channel::<bool>();
         let query = ClusterStateQuery::UpdateNodeState {
-            node_id: one_node.id,
+            node_id: one_node.id.unwrap_or_default(),
             new_state: NodeState::Leader,
             tx: oneshot_tx,
         };
@@ -152,7 +158,7 @@ mod tests {
     #[traced_test]
     async fn test_cluster_state_keeper_should_return_leader_node_details() {
         let leader = Node {
-            id: Uuid::new_v4(),
+            id: Some(Uuid::new_v4()),
             ip_address: "127.0.0.2".to_string(),
             state: NodeState::Leader,
             term: 0,

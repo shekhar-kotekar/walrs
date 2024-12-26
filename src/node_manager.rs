@@ -18,7 +18,9 @@ pub async fn start_node_manager(
     cancellation_token: CancellationToken,
 ) {
     let mut interval_timer = interval(Duration::from_millis(SLEEP_TIME_IN_SECONDS * 5));
-    let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+    let socket = UdpSocket::bind(format!("0.0.0.0:{}", node_manager_port))
+        .await
+        .unwrap();
     let arc_socket = Arc::new(socket);
 
     let socket_for_leadership_request = arc_socket.clone();
@@ -61,13 +63,12 @@ pub async fn start_node_manager(
                 recv_result = socket_for_receiving.recv_from(&mut buffer) => {
                     match recv_result {
                         Ok((size, peer)) => {
-                            tracing::info!("Received message from {}: {}", peer, String::from_utf8_lossy(&buffer[..size]));
                             let received_message = bincode::deserialize::<ClusterMessage>(&buffer[..size]).unwrap();
+                            tracing::info!("Received message from {} : {:?}", peer, received_message);
                             tokio::spawn(async move {
                                 match received_message {
                                     ClusterMessage::VoteRequest(node) => {
                                         tracing::info!("Received vote request from node: {:?}", node);
-
                                     }
                                     ClusterMessage::VoteResponse {node, answer} => {
                                         tracing::info!("Received vote response from node");
