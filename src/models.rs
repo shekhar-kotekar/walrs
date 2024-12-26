@@ -65,7 +65,7 @@ pub enum ClusterStateQuery {
         tx: oneshot::Sender<Option<Node>>,
     },
     GetLocalNode {
-        tx: oneshot::Sender<Node>,
+        tx: oneshot::Sender<Option<Node>>,
     },
     GetOtherNodes {
         tx: oneshot::Sender<Vec<Node>>,

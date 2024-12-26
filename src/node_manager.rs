@@ -35,10 +35,6 @@ pub async fn start_node_manager(
         None => {
             tracing::info!("No leader found in the cluster.");
 
-            let (oneshot_tx, _) = oneshot::channel::<Node>();
-            let query = ClusterStateQuery::GetLocalNode { tx: oneshot_tx };
-            state_keeper_tx.send(query).await.unwrap();
-
             let (oneshot_tx, oneshot_rx) = oneshot::channel::<Vec<Node>>();
             let query = ClusterStateQuery::GetOtherNodes { tx: oneshot_tx };
             state_keeper_tx.send(query).await.unwrap();
@@ -130,11 +126,17 @@ pub async fn start_node_manager(
                     state_keeper_tx.send(query).await.unwrap();
                     let other_nodes = oneshot_rx.await.unwrap();
 
-                    let (oneshot_tx, oneshot_rx) = oneshot::channel::<Node>();
+                    let (oneshot_tx, oneshot_rx) = oneshot::channel::<Option<Node>>();
                     let query = ClusterStateQuery::GetLocalNode { tx: oneshot_tx };
                     state_keeper_tx.send(query).await.unwrap();
-                    let local_node = oneshot_rx.await.unwrap();
-                    send_heartbeat(socket_for_receiving,other_nodes, local_node).await;
+                    match oneshot_rx.await.unwrap() {
+                        Some(local_node) => {
+                            send_heartbeat(socket_for_receiving, other_nodes, local_node).await;
+                        }
+                        None => {
+                            tracing::error!("Local node not found.");
+                        }
+                    }
                 }
                 _ = cancellation_token.cancelled() => {
                     tracing::info!("Node manager shutting down!");

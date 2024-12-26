@@ -9,6 +9,7 @@ pub async fn maintain_cluster_state(
     cancellation_token: CancellationToken,
 ) {
     tracing::info!("Starting cluster state keeper!");
+    tracing::info!("Cluster state: {:?}", cluster);
     loop {
         tokio::select! {
             _ = cancellation_token.cancelled() => {
@@ -60,8 +61,14 @@ pub async fn maintain_cluster_state(
                         }
                     }
                     ClusterStateQuery::GetLocalNode {tx} => {
-                        let local_node = cluster.nodes.iter().find(|node| node.is_local).cloned().unwrap();
-                        tx.send(local_node).unwrap();
+                        match cluster.nodes.iter().find(|node| node.is_local).cloned() {
+                            Some(local_node) => {
+                                tx.send(Some(local_node)).unwrap();
+                            }
+                            None => {
+                                tx.send(None).unwrap();
+                            }
+                        }
                     }
                 }
             }
@@ -185,5 +192,38 @@ mod tests {
         let actual_leader = oneshot_rx.await.unwrap().unwrap();
         assert_eq!(actual_leader, leader);
         cancellation_token.cancel();
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_cluster_state_keeper_should_return_local_node_details() {
+        let local_node = Node {
+            id: Some(Uuid::new_v4()),
+            ip_address: "127.0.0.1".to_string(),
+            state: NodeState::Follower,
+            term: 0,
+            is_local: true,
+        };
+        let cluster = Cluster {
+            nodes: vec![local_node.clone()],
+        };
+        let cancellation_token = CancellationToken::new();
+        let (tx, rx) = mpsc::channel::<ClusterStateQuery>(3);
+        let cancellation_token_clone = cancellation_token.clone();
+        tokio::spawn(async move {
+            maintain_cluster_state(cluster, rx, cancellation_token_clone).await;
+        });
+
+        let (oneshot_tx, oneshot_rx) = oneshot::channel::<Option<Node>>();
+        let query = ClusterStateQuery::GetLocalNode { tx: oneshot_tx };
+        tx.send(query).await.unwrap();
+        match oneshot_rx.await.unwrap() {
+            Some(local_node_from_keeper) => {
+                assert_eq!(local_node_from_keeper, local_node);
+            }
+            None => {
+                panic!("Local node not found in the cluster!");
+            }
+        }
     }
 }
