@@ -49,7 +49,7 @@ impl Node {
         Node {
             id: Uuid::new_v4(),
             state: NodeState::Follower,
-            ip_address: ip_address.unwrap_or_else(|| "".to_string()),
+            ip_address: ip_address.unwrap_or_default(),
             term: 0,
             is_local: false,
         }

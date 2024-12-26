@@ -25,7 +25,7 @@ pub async fn maintain_cluster_state(
                         tx.send(leader).unwrap();
                     }
                     ClusterStateQuery::GetOtherNodes {tx} => {
-                        let other_nodes_in_cluster = cluster.nodes.iter().filter(|node| node.is_local == false).cloned().collect();
+                        let other_nodes_in_cluster = cluster.nodes.iter().filter(|node| !node.is_local).cloned().collect();
                         tx.send(other_nodes_in_cluster).unwrap();
                     }
                     ClusterStateQuery::UpdateNodeState {node_id, new_state, tx} => {
@@ -42,7 +42,7 @@ pub async fn maintain_cluster_state(
                         }
                     }
                     ClusterStateQuery::NominateLocalNodeAsLeader {tx} => {
-                        match cluster.nodes.iter_mut().find(|node| node.is_local == true) {
+                        match cluster.nodes.iter_mut().find(|node| node.is_local ) {
                             Some(node) => {
                                 node.state = NodeState::Leader;
                                 node.term += 1;
@@ -56,7 +56,7 @@ pub async fn maintain_cluster_state(
                         }
                     }
                     ClusterStateQuery::GetLocalNode {tx} => {
-                        let local_node = cluster.nodes.iter().find(|node| node.is_local == true).cloned().unwrap();
+                        let local_node = cluster.nodes.iter().find(|node| node.is_local).cloned().unwrap();
                         tx.send(local_node).unwrap();
                     }
                 }

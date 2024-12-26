@@ -122,7 +122,10 @@ async fn send_request_for_leadership(
         socket
             .send_to(&message_to_send, destination)
             .await
-            .expect(format!("Couldn't send vote request message to {:?} node.", node).as_str());
+            .unwrap_or_else(|_| {
+                tracing::error!("Error sending vote request to node: {:?}", node);
+                0 // Return a default value of type usize
+            });
     }
     tracing::info!(
         "Vote request sent to {} nodes in the cluster.",
