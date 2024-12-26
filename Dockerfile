@@ -14,7 +14,11 @@ RUN cargo test && cargo build --release
 
 RUN echo $(ls -ltrh /${module_name}/target/release/)
 
-FROM scratch
+#FROM scratch
+FROM alpine:latest
+
+RUN apk add --no-cache bind-tools
+
 ARG module_name=kraft_rs
 
 COPY --from=builder /${module_name}/target/release/kraft_rs /kraft_rs
