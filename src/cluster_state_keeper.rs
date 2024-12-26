@@ -1,7 +1,7 @@
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::models::{Cluster, ClusterStateQuery, NodeState};
+use crate::models::{Cluster, ClusterStateQuery, Node, NodeState};
 
 pub async fn maintain_cluster_state(
     mut cluster: Cluster,
@@ -28,10 +28,14 @@ pub async fn maintain_cluster_state(
                         let other_nodes_in_cluster = cluster.nodes.iter().filter(|node| !node.is_local).cloned().collect();
                         tx.send(other_nodes_in_cluster).unwrap();
                     }
-                    ClusterStateQuery::UpdateNodeState {node_id, new_state, tx} => {
-                        match cluster.nodes.iter_mut().find(|node| node.id.is_some_and(|id| id == node_id)) {
+                    ClusterStateQuery::UpdateNode {node_details, tx} => {
+                        match cluster.nodes.iter_mut().find(|node| node.id.is_some_and(|id| id == node_details.id.unwrap())) {
                             Some(node) => {
-                                node.state = new_state;
+                                let updated_node = Node {
+                                    is_local: false,
+                                    ..node_details
+                                };
+                                *node = updated_node;
                                 tracing::info!("Node state updated successfully!");
                                 tx.send(true).unwrap();
                             }
@@ -77,7 +81,7 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn test_cluster_state_keeper_should_be_able_to_update_the_leader() {
-        let one_node = Node {
+        let mut one_node = Node {
             id: Some(Uuid::new_v4()),
             ip_address: "127.0.0.0".to_string(),
             state: NodeState::Follower,
@@ -93,10 +97,10 @@ mod tests {
             maintain_cluster_state(cluster, rx, cancellation_token).await;
         });
 
+        one_node.state = NodeState::Leader;
         let (oneshot_tx, oneshot_rx) = oneshot::channel::<bool>();
-        let query = ClusterStateQuery::UpdateNodeState {
-            node_id: one_node.id.unwrap_or_default(),
-            new_state: NodeState::Leader,
+        let query = ClusterStateQuery::UpdateNode {
+            node_details: one_node.clone(),
             tx: oneshot_tx,
         };
         tx.send(query).await.unwrap();

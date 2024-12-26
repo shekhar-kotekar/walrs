@@ -73,9 +73,8 @@ pub enum ClusterStateQuery {
     GetOtherNodes {
         tx: oneshot::Sender<Vec<Node>>,
     },
-    UpdateNodeState {
-        node_id: Uuid,
-        new_state: NodeState,
+    UpdateNode {
+        node_details: Node,
         tx: oneshot::Sender<bool>,
     },
     NominateLocalNodeAsLeader {

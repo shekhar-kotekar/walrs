@@ -93,7 +93,7 @@ fn get_cluster_info() -> Cluster {
     let pod_uid = std::env::var("POD_UID").unwrap();
     let pod_ip: String = std::env::var("POD_IP").unwrap();
 
-    let mut nodes_in_cluster: Vec<Node> = wait_until_nodes_are_added_to_cluster(&pod_ip.as_str());
+    let mut nodes_in_cluster: Vec<Node> = wait_until_nodes_are_added_to_cluster(pod_ip.as_str());
     let current_node = Node {
         id: Some(uuid::Uuid::parse_str(&pod_uid).unwrap()),
         ip_address: pod_ip,

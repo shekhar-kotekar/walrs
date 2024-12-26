@@ -8,8 +8,8 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    models::{Answer, ClusterMessage, ClusterStateQuery, Node},
-    SLEEP_TIME_IN_SECONDS,
+    models::{Answer, ClusterMessage, ClusterStateQuery, Node, NodeState},
+    NODE_MANAGER_PORT, SLEEP_TIME_IN_SECONDS,
 };
 
 pub async fn start_node_manager(
@@ -59,16 +59,33 @@ pub async fn start_node_manager(
         let mut buffer = [0u8; 1024];
         loop {
             let socket_for_receiving = arc_socket.clone();
+            let state_keeper_tx = state_keeper_tx.clone();
             tokio::select! {
                 recv_result = socket_for_receiving.recv_from(&mut buffer) => {
                     match recv_result {
-                        Ok((size, peer)) => {
+                        Ok((size, _)) => {
                             let received_message = bincode::deserialize::<ClusterMessage>(&buffer[..size]).unwrap();
-                            tracing::info!("Received message from {} : {:?}", peer, received_message);
                             tokio::spawn(async move {
                                 match received_message {
                                     ClusterMessage::VoteRequest(node) => {
                                         tracing::info!("Received vote request from node: {:?}", node);
+                                        let leader_node = Node {
+                                            state: NodeState::Leader,
+                                            ..node.clone()
+                                        };
+                                        let (oneshot_tx, oneshot_rx) = oneshot::channel::<bool>();
+                                        let update_node_query = ClusterStateQuery::UpdateNode {
+                                            node_details: leader_node,
+                                            tx: oneshot_tx,
+                                        };
+                                        state_keeper_tx.send(update_node_query).await.unwrap();
+                                        let result = oneshot_rx.await.unwrap();
+                                        let response = ClusterMessage::VoteResponse {
+                                            node: node.clone(),
+                                            answer: if result { Answer::LeaderAccepted } else { Answer::LeaderRejected },
+                                        };
+                                        let destination = format!("{}:{}", node.ip_address, node_manager_port);
+                                        socket_for_receiving.send_to(&bincode::serialize(&response).unwrap(), destination).await.unwrap();
                                     }
                                     ClusterMessage::VoteResponse {node, answer} => {
                                         tracing::info!("Received vote response from node");
@@ -101,7 +118,12 @@ pub async fn start_node_manager(
                     let query = ClusterStateQuery::GetOtherNodes { tx: oneshot_tx };
                     state_keeper_tx.send(query).await.unwrap();
                     let other_nodes = oneshot_rx.await.unwrap();
-                    send_heartbeat(other_nodes);
+
+                    let (oneshot_tx, oneshot_rx) = oneshot::channel::<Node>();
+                    let query = ClusterStateQuery::GetLocalNode { tx: oneshot_tx };
+                    state_keeper_tx.send(query).await.unwrap();
+                    let local_node = oneshot_rx.await.unwrap();
+                    send_heartbeat(socket_for_receiving,other_nodes, local_node).await;
                 }
                 _ = cancellation_token.cancelled() => {
                     tracing::info!("Node manager shutting down!");
@@ -139,9 +161,23 @@ async fn send_request_for_leadership(
     );
 }
 
-fn send_heartbeat(other_nodes_in_cluster: Vec<Node>) {
+async fn send_heartbeat(
+    socket: Arc<UdpSocket>,
+    other_nodes_in_cluster: Vec<Node>,
+    local_node: Node,
+) {
+    let message_to_send =
+        bincode::serialize(&ClusterMessage::Heartbeat(local_node.clone())).unwrap();
     for node in other_nodes_in_cluster {
         tracing::info!("Sending heartbeat to node: {:?}", node);
+        let destination = format!("{}:{}", node.ip_address, NODE_MANAGER_PORT);
+        socket
+            .send_to(&message_to_send, destination)
+            .await
+            .unwrap_or_else(|_| {
+                tracing::error!("Error sending heartbeat to node: {:?}", node);
+                0 // Return a default value of type usize
+            });
     }
 }
 
