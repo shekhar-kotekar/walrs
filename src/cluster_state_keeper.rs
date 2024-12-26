@@ -29,7 +29,7 @@ pub async fn maintain_cluster_state(
                         tx.send(other_nodes_in_cluster).unwrap();
                     }
                     ClusterStateQuery::UpdateNode {node_details, tx} => {
-                        match cluster.nodes.iter_mut().find(|node| node.id.is_some_and(|id| id == node_details.id.unwrap())) {
+                        match cluster.nodes.iter_mut().find(|node| node.id.is_some_and(|id| id == node_details.id.unwrap()) || node.ip_address == node_details.ip_address) {
                             Some(node) => {
                                 let updated_node = Node {
                                     is_local: false,
@@ -51,11 +51,11 @@ pub async fn maintain_cluster_state(
                                 node.state = NodeState::Leader;
                                 node.term += 1;
                                 tracing::info!("Local node nominated as leader!");
-                                tx.send(node.term).unwrap();
+                                tx.send(Some(node.clone())).unwrap();
                             }
                             None => {
                                 tracing::info!("Local node not found in the cluster!");
-                                tx.send(0).unwrap();
+                                tx.send(None).unwrap();
                             }
                         }
                     }

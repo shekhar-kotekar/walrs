@@ -35,10 +35,9 @@ pub async fn start_node_manager(
         None => {
             tracing::info!("No leader found in the cluster.");
 
-            let (oneshot_tx, oneshot_rx) = oneshot::channel::<Node>();
+            let (oneshot_tx, _) = oneshot::channel::<Node>();
             let query = ClusterStateQuery::GetLocalNode { tx: oneshot_tx };
             state_keeper_tx.send(query).await.unwrap();
-            let local_node = oneshot_rx.await.unwrap();
 
             let (oneshot_tx, oneshot_rx) = oneshot::channel::<Vec<Node>>();
             let query = ClusterStateQuery::GetOtherNodes { tx: oneshot_tx };
@@ -46,8 +45,8 @@ pub async fn start_node_manager(
             let other_nodes = oneshot_rx.await.unwrap();
 
             send_request_for_leadership(
+                state_keeper_tx.clone(),
                 socket_for_leadership_request,
-                local_node,
                 other_nodes,
                 node_manager_port,
             )
@@ -103,6 +102,18 @@ pub async fn start_node_manager(
                                     }
                                     ClusterMessage::Heartbeat(node) => {
                                         tracing::info!("Received heartbeat from node: {:?}", node);
+                                        let (oneshot_tx, oneshot_rx) = oneshot::channel::<bool>();
+                                        let update_node_query = ClusterStateQuery::UpdateNode {
+                                            node_details: node.clone(),
+                                            tx: oneshot_tx,
+                                        };
+                                        state_keeper_tx.send(update_node_query).await.unwrap();
+                                        let result = oneshot_rx.await.unwrap();
+                                        if result {
+                                            tracing::info!("Node {:?} updated successfully.", node);
+                                        } else {
+                                            tracing::error!("Error updating node: {:?}", node);
+                                        }
                                     }
                                 }
                             });
@@ -135,15 +146,23 @@ pub async fn start_node_manager(
 }
 
 async fn send_request_for_leadership(
+    state_keeper_tx: Sender<ClusterStateQuery>,
     socket: Arc<UdpSocket>,
-    mut local_node: Node,
     other_nodes: Vec<Node>,
     node_manager_port: u32,
 ) {
-    local_node.next_candidate();
+    let (oneshot_tx, oneshot_rx) = oneshot::channel::<Option<Node>>();
+    let nominate_local_node_as_leader_query =
+        ClusterStateQuery::NominateLocalNodeAsLeader { tx: oneshot_tx };
+    state_keeper_tx
+        .send(nominate_local_node_as_leader_query)
+        .await
+        .unwrap();
+    let result = oneshot_rx.await.unwrap();
+    let local_node: Node = result.unwrap();
     tracing::info!("Nominating {:?} as a leader.", local_node);
-    let message_to_send = bincode::serialize(&ClusterMessage::VoteRequest(local_node)).unwrap();
 
+    let message_to_send = bincode::serialize(&ClusterMessage::VoteRequest(local_node)).unwrap();
     for node in other_nodes.iter() {
         tracing::info!("Sending vote request to node: {:?}", node);
         let destination = format!("{}:{}", node.ip_address, node_manager_port);
@@ -185,6 +204,7 @@ async fn send_heartbeat(
 mod tests {
     use super::*;
     use crate::models::{Node, NodeState};
+    use tokio::sync::mpsc;
     use tracing_test::traced_test;
 
     #[tokio::test]
@@ -193,7 +213,7 @@ mod tests {
         let other_node_1 = Node::new(Some("0.0.0.0".to_string()));
         let other_node_2 = Node::new(Some("0.0.0.0".to_string()));
 
-        let current_node = Node::new(Some("0.0.0.0".to_string()));
+        let local_node = Node::new(Some("0.0.0.0".to_string()));
 
         let node_manager_port = 5056;
         let socket = UdpSocket::bind(format!("0.0.0.0:{}", node_manager_port))
@@ -201,15 +221,31 @@ mod tests {
             .unwrap();
         let arc_socket = Arc::new(socket);
         let arc_socket_clone = arc_socket.clone();
+        let (state_keeper_tx, mut state_keeper_rx) = mpsc::channel::<ClusterStateQuery>(3);
         tokio::spawn(async move {
             send_request_for_leadership(
+                state_keeper_tx,
                 arc_socket_clone,
-                current_node,
                 vec![other_node_1, other_node_2],
                 node_manager_port,
             )
             .await;
         });
+
+        match state_keeper_rx.recv().await.unwrap() {
+            ClusterStateQuery::NominateLocalNodeAsLeader { tx } => {
+                let local_leader_node = Node {
+                    state: NodeState::Candidate,
+                    term: 1,
+                    ..local_node.clone()
+                };
+                tx.send(Some(local_leader_node)).unwrap();
+            }
+            other => panic!(
+                "Expected NominateLocalNodeAsLeader query, but got {:?}",
+                other
+            ),
+        }
 
         let mut buffer = [0u8; 2048];
         arc_socket.recv_from(&mut buffer).await.unwrap();

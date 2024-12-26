@@ -54,12 +54,9 @@ impl Node {
             is_local: false,
         }
     }
-    pub fn next_candidate(&mut self) {
-        self.state = NodeState::Candidate;
-        self.term += 1;
-    }
 }
 
+#[derive(Debug)]
 pub enum ClusterStateQuery {
     GetClusterState {
         tx: oneshot::Sender<Cluster>,
@@ -78,7 +75,7 @@ pub enum ClusterStateQuery {
         tx: oneshot::Sender<bool>,
     },
     NominateLocalNodeAsLeader {
-        tx: oneshot::Sender<u64>,
+        tx: oneshot::Sender<Option<Node>>,
     },
 }
 
