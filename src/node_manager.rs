@@ -1,5 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
+use rand::Rng;
 use tokio::{
     net::UdpSocket,
     sync::{mpsc::Sender, oneshot},
@@ -9,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     models::{Answer, ClusterMessage, ClusterStateQuery, Node, NodeState},
-    NODE_MANAGER_PORT, SLEEP_TIME_IN_SECONDS,
+    NODE_MANAGER_PORT,
 };
 
 pub async fn start_node_manager(
@@ -17,7 +18,10 @@ pub async fn start_node_manager(
     node_manager_port: u32,
     cancellation_token: CancellationToken,
 ) {
-    let mut interval_timer = interval(Duration::from_millis(SLEEP_TIME_IN_SECONDS * 5));
+    let random_num = rand::thread_rng().gen_range(5000..30000);
+    let mut interval_timer = interval(Duration::from_millis(random_num));
+    tracing::info!("heartbeat interval time is: {} seconds.", random_num / 1000);
+
     let socket = UdpSocket::bind(format!("0.0.0.0:{}", node_manager_port))
         .await
         .unwrap();
