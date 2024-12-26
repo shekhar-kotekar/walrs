@@ -11,12 +11,12 @@ metadata:
   name: kraft-rs-service
   namespace: kraft-rs
   labels:
-    app: kraft-rs-service
+    app: kraftrs
 spec:
   clusterIP: None
   selector:
-    app: kraft-rs-service
+    app: kraftrs
   ports:
-    - protocol: TCP
-      port: 5056
-      targetPort: 5056
+  - protocol: UDP
+    port: 5056
+    targetPort: 5056

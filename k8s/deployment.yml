@@ -1,12 +1,12 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: kraftrs
+  name: kraft-rs-broker
   namespace: kraft-rs
   labels:
     app: kraftrs
 spec:
-  replicas: 2
+  replicas: 3
   selector:
     matchLabels:
       app: kraftrs
@@ -14,64 +14,28 @@ spec:
     metadata:
       labels:
         app: kraftrs
+        role: broker
     spec:
       containers:
-        - name: kraft-rs
-          image: localhost:5001/kraft_rs:latest
-          env:
-            - name: CONFIG_FILE_PATH
-              value: "/configs/node_1_config.toml"
-            - name: POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
-            - name: POD_UID
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.uid
-          ports:
-            - containerPort: 8080
-          resources:
-            requests:
-              memory: "32Mi"
-              cpu: "250m"
-            limits:
-              memory: "128Mi"
-              cpu: "500m"
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: kraftrs
-  namespace: kraft-rs
-  labels:
-    app: kraftrs
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: kraftrs
-  template:
-    metadata:
-      labels:
-        app: kraftrs
-    spec:
-      containers:
-        - name: kraftrs
-          image: localhost:5001/kraft_rs:latest
-          env:
-            - name: CONFIG_FILE_PATH
-              value: "/configs/node_2_config.toml"
-            - name: POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
-          ports:
-            - containerPort: 8080
-          resources:
-            requests:
-              memory: "32Mi"
-              cpu: "250m"
-            limits:
-              memory: "128Mi"
-              cpu: "500m"
+      - name: kraftrs
+        image: localhost:5001/kraft_rs:latest
+        env:
+        # - name: CONFIG_FILE_PATH
+        #   value: "/configs/node_1_config.toml"
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
+        ports:
+        - containerPort: 5056
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "250m"
+          limits:
+            memory: "128Mi"
+            cpu: "500m"

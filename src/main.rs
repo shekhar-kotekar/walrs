@@ -16,14 +16,14 @@ const MAIN_PORT: u32 = 5056;
 const NODE_MANAGER_PORT: u32 = 5057;
 
 const MAX_RETRIES: u8 = 30;
-const SLEEP_TIME_IN_SECONDS: u64 = 3;
+const SLEEP_TIME_IN_SECONDS: u64 = 5;
 const K8S_SERVICE_NAME: &str = "kraft-rs-service";
 const MPSC_MAX_Q_SIZE: usize = 100;
 
 #[tokio::main]
 async fn main() {
     enable_tracing();
-    console_subscriber::init();
+    //console_subscriber::init();
 
     let task_tracker = TaskTracker::new();
     let cancellation_token = CancellationToken::new();

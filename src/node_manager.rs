@@ -17,7 +17,7 @@ pub async fn start_node_manager(
     node_manager_port: u32,
     cancellation_token: CancellationToken,
 ) {
-    let mut interval_timer = interval(Duration::from_millis(SLEEP_TIME_IN_SECONDS));
+    let mut interval_timer = interval(Duration::from_millis(SLEEP_TIME_IN_SECONDS * 5));
     let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
     let arc_socket = Arc::new(socket);
 
