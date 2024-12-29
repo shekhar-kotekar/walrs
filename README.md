@@ -13,14 +13,14 @@ cargo test node_manager -- --nocapture
     - [x] Run 3 pods with above code
     - Check if all the three pods
         - [x] can communicate with each other over UDP
-        - accept one of the pod as a leader
-        - change their state as follower  
+        - [x] accept one of the pod as a leader
+        - [x] change their state as follower  
 
 - Milestone 2: Collision cases
-    - When should a node be considered a leader?
-        - after all the nodes accept?
-        - or when majority of nodes accept?
-    - How many times leader election should happen? infinitely?
+    - [x] When should a node be considered a leader?
+        - [x] after all the nodes accept?
+        - [x] or when majority of nodes accept?
+    - [x] How many times leader election should happen? infinitely?
 
 - Milestone 3:
     - Find out if Kafka has 
