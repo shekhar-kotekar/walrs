@@ -29,7 +29,7 @@ async fn main() {
         id: Uuid::new_v4(),
         state: NodeState::Follower,
         term: 0,
-        address: pod_ip.clone(),
+        address: format!("{}:{}", pod_ip, NODE_MANAGER_PORT),
     };
     let task_tracker = TaskTracker::new();
     let cancellation_token = CancellationToken::new();
@@ -40,13 +40,7 @@ async fn main() {
     let node_cancellation_token = cancellation_token.clone();
     task_tracker.spawn(async move {
         local_node
-            .run(
-                interval_ms,
-                NODE_MANAGER_PORT,
-                peers,
-                rx,
-                node_cancellation_token,
-            )
+            .run(interval_ms, peers, rx, node_cancellation_token)
             .await;
     });
 
