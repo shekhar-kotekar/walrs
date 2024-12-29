@@ -33,7 +33,11 @@ impl Node {
         );
 
         let mut heartbeat_interval = interval(Duration::from_millis(interval_ms));
-        let socket = UdpSocket::bind(format!("0.0.0.0:{}", node_manager_port))
+        // let socket = UdpSocket::bind(format!("0.0.0.0:{}", node_manager_port))
+        //     .await
+        //     .unwrap();
+
+        let socket = UdpSocket::bind(format!("{}:{}", self.address, node_manager_port))
             .await
             .unwrap();
 
