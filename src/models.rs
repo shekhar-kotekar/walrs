@@ -27,7 +27,6 @@ pub enum NodeState {
     Leader,
     Follower,
     Candidate,
-    InterimLeader,
 }
 
 #[derive(Clone, Debug, PartialEq)]
