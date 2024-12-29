@@ -101,6 +101,7 @@ fn dig_cluster_nodes(service_name: &str, pod_ip: &str) -> Vec<String> {
             .split("\n")
             .map(|ip| ip.trim().to_string())
             .filter(|ip| !ip.is_empty() && ip != pod_ip)
+            .map(|ip| format!("{}:{}", ip, NODE_MANAGER_PORT))
             .collect()
     } else {
         Vec::new()

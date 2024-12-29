@@ -33,9 +33,6 @@ impl Node {
         );
 
         let mut heartbeat_interval = interval(Duration::from_millis(interval_ms));
-        // let socket = UdpSocket::bind(format!("0.0.0.0:{}", node_manager_port))
-        //     .await
-        //     .unwrap();
 
         let socket = UdpSocket::bind(format!("{}:{}", self.address, node_manager_port))
             .await
@@ -137,7 +134,7 @@ impl Node {
                             self.become_candidate();
                         }
                         NodeState::Candidate => {
-                            tracing::info!("Node {} is candidate, starting election with term: {}", self.id, self.term);
+                            tracing::info!("Node {} is candidate, term: {}", self.id, self.term);
                             self.send_vote_request_to_peers(&peers, &socket).await;
                         }
                         NodeState::Leader => {
@@ -178,6 +175,7 @@ impl Node {
             tracing::info!("Sending vote request to peer: {}", peer);
             let _ = socket.send_to(&message_to_peers, peer).await;
         }
+        tracing::info!("Vote requests sent to all peers.");
     }
 
     fn become_candidate(&mut self) {
@@ -200,7 +198,7 @@ mod tests {
         let interval_ms: u64 = 500;
         let mut test_node = Node {
             id: Uuid::new_v4(),
-            address: "".to_string(),
+            address: "0.0.0.0".to_string(),
             state: NodeState::Follower,
             term: 0,
         };
