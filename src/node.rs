@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+use crate::models::{NodeCommand, NodeQuery, NodeState, VoteResult};
 
 #[derive(Serialize, Deserialize)]
 pub struct Node {
@@ -24,6 +26,11 @@ impl Node {
     ) {
         assert_ne!(peers.len(), 0, "At least one peer is required.");
         assert_ne!(interval_ms, 0, "Interval must be greater than 0");
+        tracing::info!(
+            "Node {} starting with heartbeat interval: {} milliseconds",
+            self.id,
+            interval_ms
+        );
 
         let mut heartbeat_interval = interval(Duration::from_millis(interval_ms));
         let socket = UdpSocket::bind(format!("0.0.0.0:{}", node_manager_port))
@@ -126,11 +133,13 @@ impl Node {
                             self.become_candidate();
                         }
                         NodeState::Candidate => {
-                            tracing::info!("Node {} is candidate, starting election with term number: {}", self.id, self.term);
+                            tracing::info!("Node {} is candidate, starting election with term: {}", self.id, self.term);
                             self.send_vote_request_to_peers(&peers, &socket).await;
                         }
                         NodeState::Leader => {
                             tracing::info!("Node {} is a leader.", self.id);
+                            total_votes_received = 0;
+                            nomination_accepted_count = 0;
                             self.send_heartbeat(&peers, &socket).await;
                         }
                     }
@@ -173,46 +182,12 @@ impl Node {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum VoteResult {
-    Accepted,
-    Rejected,
-}
-
-pub enum NodeQuery {
-    GetState {
-        tx: oneshot::Sender<NodeState>,
-    },
-    SetState {
-        new_state: NodeState,
-        tx: oneshot::Sender<NodeState>,
-    },
-    GetPeers {
-        tx: oneshot::Sender<Vec<String>>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum NodeState {
-    Leader,
-    Follower,
-    Candidate,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum NodeCommand {
-    RequetForVote { candidate_id: Uuid, term: u64 },
-    VoteResponse { voter_id: Uuid, vote: VoteResult },
-    Heartbeat { leader_id: Uuid, term: u64 },
-    AddPeer { peer_address: String },
-    RemovePeer { peer_address: String },
-}
-
 #[cfg(test)]
 mod tests {
     use std::thread;
 
     use super::*;
+    use tokio::sync::oneshot;
     use tracing_test::traced_test;
 
     #[tokio::test]
