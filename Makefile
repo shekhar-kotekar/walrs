@@ -3,6 +3,7 @@ export CONFIG_FILE_PATH := config.toml
 project_name := kraft_rs
 k8s_context := kind-kind
 IMAGE_REGISTRY := localhost:5001
+export GIT_COMMIT := $(shell git rev-parse --short HEAD)
 
 .PHONY: run set_kind_context dockerize deploy teardown
 
@@ -29,18 +30,16 @@ set_kind_context:
 
 dockerize: set_kind_context
 	@echo "INFO: Building docker image."
-
-	GIT_COMMIT=$(git rev-parse --short HEAD)
-	@echo "INFO: GIT_COMMIT: ${GIT_COMMIT}"
 	# --progress=plain
-	docker build --tag ${IMAGE_REGISTRY}/${project_name}:latest -f ./Dockerfile .
-	docker push ${IMAGE_REGISTRY}/${project_name}:latest
+	docker build --tag ${IMAGE_REGISTRY}/${project_name}:${GIT_COMMIT} -f ./Dockerfile .
+	docker push ${IMAGE_REGISTRY}/${project_name}:${GIT_COMMIT}
 
 	@echo "INFO: docker image built successfully!"
 	docker images
 
 deploy: dockerize
 	@echo
+	@sed 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' ./k8s/deployment.yml | kubectl apply -f -
 	@echo "INFO: Deploying to k8s cluster"
 	kubectl apply -f ./k8s/prerequisites.yml
 	kubectl apply -f ./k8s/deployment.yml
@@ -54,6 +53,7 @@ redeploy: dockerize
 	kubectl rollout restart deployment/kraft-rs --namespace=kraft-rs
 
 teardown: set_kind_context
+	@sed 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' ./k8s/deployment.yml | kubectl apply -f -
 	@echo "INFO: Deleting deployment"
 	kubectl delete -f ./k8s/deployment.yml
 	kubectl delete -f ./k8s/prerequisites.yml
