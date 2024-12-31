@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: kraft-rs
+  name: ${PROJECT_NAME}
   labels:
     name: kraft-rs
 ---
@@ -9,7 +9,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: kraft-rs-service
-  namespace: kraft-rs
+  namespace: ${PROJECT_NAME}
   labels:
     app: kraftrs
 spec:
@@ -25,7 +25,7 @@ apiVersion: v1
 kind: PersistentVolume
 metadata:
   name: kraft-rs-local-pv
-  namespace: kraft-rs
+  namespace: ${PROJECT_NAME}
 spec:
   capacity:
     storage: 256Mi

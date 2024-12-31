@@ -1,6 +1,6 @@
 export CONFIG_FILE_PATH := config.toml
 
-project_name := kraft_rs
+export PROJECT_NAME := kraft_rs
 k8s_context := kind-kind
 IMAGE_REGISTRY := localhost:5001
 export GIT_COMMIT := $(shell git rev-parse --short HEAD)
@@ -26,31 +26,37 @@ test: prepare
 set_kind_context:
 	kubectl config use-context ${k8s_context}
 	@echo "INFO: k8s context set to ${k8s_context}"
-	@sed 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' ./k8s/deployment.yml | kubectl apply -f -
 	@echo
 
 dockerize: set_kind_context
 	@echo "INFO: Building docker image."
 	# --progress=plain
-	docker build --tag ${IMAGE_REGISTRY}/${project_name}:${GIT_COMMIT} -f ./Dockerfile .
-	docker push ${IMAGE_REGISTRY}/${project_name}:${GIT_COMMIT}
+	docker build --tag ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT} -f ./Dockerfile .
+	docker push ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT}
 
 	@echo "INFO: docker image built successfully!"
 	docker images
 
-deploy: dockerize
+replace_environment_variables: dockerize
+	@echo "INFO: Replacing environment variables in k8s deployment file"
+	@sed 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' ./k8s/deployment.yml | kubectl apply -f -
+	@sed 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' ./k8s/deployment.yml | kubectl apply -f -
+
+	@echo "INFO: Environment variables replaced successfully!"
+
+deploy: replace_environment_variables
 	@echo
 	@echo "INFO: Deploying to k8s cluster"
 	kubectl apply -f ./k8s/prerequisites.yml
 	kubectl apply -f ./k8s/deployment.yml
 
 	@echo "INFO: Deployed successfully!"
-	kubectl get pods --namespace=kraft-rs
+	kubectl get pods --namespace=${PROJECT_NAME}
 
 redeploy: dockerize
 	@echo
 	@echo "INFO: Redeploying to k8s cluster"
-	kubectl rollout restart deployment/kraft-rs --namespace=kraft-rs
+	kubectl rollout restart statefulset/kraft-rs-broker --namespace=${PROJECT_NAME}
 
 teardown: set_kind_context
 	@echo "INFO: Deleting deployment"
