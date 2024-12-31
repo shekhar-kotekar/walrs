@@ -1,11 +1,11 @@
 export CONFIG_FILE_PATH := config.toml
 
-export PROJECT_NAME := kraft_rs
+export PROJECT_NAME := kraft-rs
 k8s_context := kind-kind
 IMAGE_REGISTRY := localhost:5001
 export GIT_COMMIT := $(shell git rev-parse --short HEAD)
 
-.PHONY: run set_kind_context dockerize deploy teardown
+.PHONY: run set_kind_context dockerize deploy teardown replace_environment_variables
 
 run:
 	cargo run
@@ -39,16 +39,23 @@ dockerize: set_kind_context
 
 replace_environment_variables: dockerize
 	@echo "INFO: Replacing environment variables in k8s deployment file"
-	@sed 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' ./k8s/deployment.yml | kubectl apply -f -
-	@sed 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' ./k8s/deployment.yml | kubectl apply -f -
+	@echo "DEBUG: git_commit = $(GIT_COMMIT)"
 
+	@mkdir -p ./k8s/${GIT_COMMIT}
+	
+	@sed -e 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' \
+		 -e 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' < ./k8s/prerequisites.yml > ./k8s/${GIT_COMMIT}/prerequisites.yml
+
+	@sed -e 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' \
+		 -e 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' < ./k8s/statefulset.yml > ./k8s/${GIT_COMMIT}/statefulset.yml
+	
 	@echo "INFO: Environment variables replaced successfully!"
 
 deploy: replace_environment_variables
 	@echo
 	@echo "INFO: Deploying to k8s cluster"
-	kubectl apply -f ./k8s/prerequisites.yml
-	kubectl apply -f ./k8s/deployment.yml
+	kubectl apply -f ./k8s/${GIT_COMMIT}/prerequisites.yml
+	kubectl apply -f ./k8s/${GIT_COMMIT}/statefulset.yml
 
 	@echo "INFO: Deployed successfully!"
 	kubectl get pods --namespace=${PROJECT_NAME}
@@ -60,8 +67,10 @@ redeploy: dockerize
 
 teardown: set_kind_context
 	@echo "INFO: Deleting deployment"
-	kubectl delete -f ./k8s/deployment.yml
-	kubectl delete -f ./k8s/prerequisites.yml
+	kubectl delete -f ./k8s/${GIT_COMMIT}/statefulset.yml
+	kubectl delete -f ./k8s/${GIT_COMMIT}/prerequisites.yml
+
+	rm -rf ./k8s/${GIT_COMMIT}/
 
 	@echo "INFO: Deleted successfully!"
 	kubectl get namespaces
