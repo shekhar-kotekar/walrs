@@ -26,6 +26,7 @@ test: prepare
 set_kind_context:
 	kubectl config use-context ${k8s_context}
 	@echo "INFO: k8s context set to ${k8s_context}"
+	@sed 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' ./k8s/deployment.yml | kubectl apply -f -
 	@echo
 
 dockerize: set_kind_context
@@ -39,7 +40,6 @@ dockerize: set_kind_context
 
 deploy: dockerize
 	@echo
-	@sed 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' ./k8s/deployment.yml | kubectl apply -f -
 	@echo "INFO: Deploying to k8s cluster"
 	kubectl apply -f ./k8s/prerequisites.yml
 	kubectl apply -f ./k8s/deployment.yml
@@ -53,10 +53,9 @@ redeploy: dockerize
 	kubectl rollout restart deployment/kraft-rs --namespace=kraft-rs
 
 teardown: set_kind_context
-	@sed 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' ./k8s/deployment.yml | kubectl apply -f -
 	@echo "INFO: Deleting deployment"
 	kubectl delete -f ./k8s/deployment.yml
 	kubectl delete -f ./k8s/prerequisites.yml
 
 	@echo "INFO: Deleted successfully!"
-	kubectl get pods --namespace=kraft-rs
+	kubectl get namespaces

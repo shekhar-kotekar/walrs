@@ -43,16 +43,3 @@ spec:
           operator: In
           values:
           - kind-worker
-
-# ---
-# apiVersion: v1
-# kind: PersistentVolumeClaim
-# metadata:
-#   name: kraft-rs-pvc
-#   namespace: kraft-rs
-# spec:
-#   accessModes:
-#   - ReadWriteOnce
-#   resources:
-#     requests:
-#       storage: 256Mi
