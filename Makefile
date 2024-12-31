@@ -30,6 +30,8 @@ set_kind_context:
 dockerize: set_kind_context
 	@echo "INFO: Building docker image."
 
+	GIT_COMMIT=$(git rev-parse --short HEAD)
+	@echo "INFO: GIT_COMMIT: ${GIT_COMMIT}"
 	# --progress=plain
 	docker build --tag ${IMAGE_REGISTRY}/${project_name}:latest -f ./Dockerfile .
 	docker push ${IMAGE_REGISTRY}/${project_name}:latest
@@ -45,6 +47,11 @@ deploy: dockerize
 
 	@echo "INFO: Deployed successfully!"
 	kubectl get pods --namespace=kraft-rs
+
+redeploy: dockerize
+	@echo
+	@echo "INFO: Redeploying to k8s cluster"
+	kubectl rollout restart deployment/kraft-rs --namespace=kraft-rs
 
 teardown: set_kind_context
 	@echo "INFO: Deleting deployment"

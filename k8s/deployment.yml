@@ -17,19 +17,22 @@ spec:
         role: broker
     spec:
       containers:
-      - name: kraftrs
-        image: localhost:5001/kraft_rs:latest
-        env:
-        - name: POD_IP
-          valueFrom:
-            fieldRef:
-              fieldPath: status.podIP
-        ports:
-        - containerPort: 5056
-        resources:
-          requests:
-            memory: "32Mi"
-            cpu: "250m"
-          limits:
-            memory: "128Mi"
-            cpu: "500m"
+        - name: kraftrs
+          image: localhost:5001/kraft_rs:latest
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          ports:
+            - containerPort: 5056
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "250m"
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+      volumeMounts:
+        - name: kraft-rs-logs
+          mountPath: /tmp/kraft-rs/logs/
