@@ -10,6 +10,8 @@ use uuid::Uuid;
 mod common;
 mod models;
 mod node;
+mod partition;
+mod topic;
 
 // TODO: Read all the constants from a config file
 const NODE_MANAGER_PORT: u16 = 5056;

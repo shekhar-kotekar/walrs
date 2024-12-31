@@ -2,6 +2,24 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+pub enum ClientCommand {
+    CreateTopic {
+        topic_name: String,
+        num_partitions: u8,
+        retention_period: u16,
+    },
+    DeleteTopic {
+        topic_name: String,
+    },
+}
+
+pub enum ClusterResponse {
+    TopicCreated {
+        topic_id: Uuid,
+        leader_address: String,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum VoteResult {
     Accepted,
