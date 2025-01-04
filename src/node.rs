@@ -24,10 +24,12 @@ impl Node {
         mut main_rx: mpsc::Receiver<MainCommands>,
         cancellation_token: CancellationToken,
     ) {
-        assert_ne!(peers.len(), 0, "At least one peer is required.");
+        let mut num_peers = u32::try_from(peers.len()).unwrap();
+        assert_ne!(num_peers, 0, "At least one peer needed to start node.");
         assert_ne!(interval_ms, 0, "Interval must be greater than 0");
+
         tracing::info!(
-            "Node {} starting with heartbeat interval: {} millis, address : {}",
+            "Starting node {}, heartbeat interval: {} millis, address : {}",
             self.id,
             interval_ms,
             self.address
@@ -35,9 +37,8 @@ impl Node {
 
         let mut heartbeat_interval = interval(Duration::from_millis(interval_ms));
 
-        let node_2_node_socket = UdpSocket::bind(&self.address).await.unwrap();
+        let node_socket = UdpSocket::bind(&self.address).await.unwrap();
 
-        let mut num_peers = u32::try_from(peers.len()).unwrap();
         let minimum_votes_needed: u32 = (num_peers / 2) + 1;
         tracing::debug!("Minimum votes needed: {}", minimum_votes_needed);
 
@@ -49,7 +50,7 @@ impl Node {
         loop {
             let mut buffer = [0u8; 48];
             tokio::select! {
-                recv_result = node_2_node_socket.recv_from(&mut buffer) => {
+                recv_result = node_socket.recv_from(&mut buffer) => {
                     match recv_result {
                         Ok((bytes_read, peer_address)) => {
                             let command: NodeCommand = bincode::deserialize(&buffer[..bytes_read]).unwrap();
@@ -80,7 +81,7 @@ impl Node {
                                         vote: vote_result,
                                     };
                                     let serialized_vote_result = bincode::serialize(&response).unwrap();
-                                    let _ = node_2_node_socket.send_to(&serialized_vote_result, peer_address).await;
+                                    let _ = node_socket.send_to(&serialized_vote_result, peer_address).await;
                                 }
                                 NodeCommand::VoteResponse { voter_id, vote } => {
                                     tracing::info!("received vote response from {}", voter_id);
@@ -147,6 +148,7 @@ impl Node {
                     match self.state {
                         NodeState::Follower => if leader_node.is_none() {
                             tracing::info!("Node {} is {:?}", self.id, self.state);
+                            tokio::time::sleep(Duration::from_millis(interval_ms)).await;
                             self.become_candidate();
                         }
                         NodeState::Candidate => if leader_node.is_none() {
@@ -156,7 +158,7 @@ impl Node {
                                 self.state = NodeState::Follower;
                                 max_vote_requests = 20;
                             } else {
-                                self.send_vote_request_to_peers(&peers, &node_2_node_socket).await;
+                                self.send_vote_request_to_peers(&peers, &node_socket).await;
                                 max_vote_requests -= 1;
                             }
                         }
@@ -164,7 +166,7 @@ impl Node {
                             tracing::info!("Node {} is a leader.", self.id);
                             total_votes_received = 0;
                             nomination_accepted_count = 0;
-                            self.send_heartbeat(&peers, &node_2_node_socket).await;
+                            self.send_heartbeat(&peers, &node_socket).await;
                         }
                     }
                 }
@@ -218,7 +220,7 @@ mod should {
     #[tokio::test]
     #[traced_test]
     async fn test_node_run() {
-        let interval_ms: u64 = 500;
+        let interval_ms: u64 = 25;
         let mut test_node = Node::new("0.0.0.0:5055".to_string());
 
         let (node_tx, rx) = mpsc::channel(10);
@@ -243,7 +245,7 @@ mod should {
         assert_eq!(state, NodeState::Follower);
 
         // Wait a bit to ensure the message has been processed
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
         let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeState>();
         node_tx
@@ -261,7 +263,7 @@ mod should {
     #[tokio::test]
     #[traced_test]
     async fn become_leader_if_enough_peers_accept_candidature() {
-        let interval_ms: u64 = 250;
+        let interval_ms: u64 = 20;
         let mut test_node = Node::new("0.0.0.0:5056".to_string());
         let test_node_id = test_node.id;
 
@@ -280,7 +282,7 @@ mod should {
             test_node.run(interval_ms, peers, rx, ct_clone).await;
         });
 
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(50));
 
         let mut buffer = [0; 100];
         let vote_result = NodeCommand::VoteResponse {
@@ -336,7 +338,7 @@ mod should {
     #[tokio::test]
     #[traced_test]
     async fn become_follower_if_majority_peers_do_not_accept_as_a_leader() {
-        let interval_ms: u64 = 250;
+        let interval_ms: u64 = 20;
         let mut test_node = Node::new("0.0.0.0:5059".to_string());
         let node_id = test_node.id;
 
@@ -408,7 +410,7 @@ mod should {
     #[tokio::test]
     #[traced_test]
     async fn send_heartbeat_signal_to_peers() {
-        let interval_ms: u64 = 100;
+        let interval_ms: u64 = 20;
         let test_node_id = Uuid::new_v4();
         let mut test_node = Node {
             id: test_node_id,
