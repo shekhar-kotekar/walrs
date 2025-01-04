@@ -1,10 +1,12 @@
+use std::collections::HashMap;
+
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::time::{interval, sleep, Duration};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::models::{MainCommands, Node, NodeCommand, NodeState, VoteResult};
+use crate::models::{MainCommands, Node, NodeCommand, NodeResponse, NodeState, Topic, VoteResult};
 
 const MIN_HEARTBEAT_INTERVAL_MS: u64 = 10;
 const MAX_HEARTBEAT_INTERVAL_MS: u64 = 10000;
@@ -36,7 +38,7 @@ impl Node {
         );
         assert!(
             interval_ms >= MIN_HEARTBEAT_INTERVAL_MS,
-            "Heartbeat Interval must be greater than 10 millis"
+            "Heartbeat Interval must be greater than 100 millis"
         );
 
         tracing::info!(
@@ -47,16 +49,16 @@ impl Node {
         );
 
         let mut heartbeat_interval = interval(Duration::from_millis(interval_ms));
-
         let node_socket = UdpSocket::bind(&self.address).await.unwrap();
-
-        let minimum_votes_needed: u32 = (num_peers / 2) + 1;
-        tracing::debug!("Minimum votes needed: {}", minimum_votes_needed);
 
         let mut total_votes_received = 0;
         let mut nomination_accepted_count = 0;
-        let mut max_vote_requests = 20;
+        let mut max_candidate_attempts = 10;
         let mut leader_node: Option<Node> = None;
+        let mut topics: HashMap<String, Topic> = HashMap::new();
+
+        let min_votes_needed: u32 = (num_peers / 2) + 1;
+        tracing::debug!("Minimum votes needed to be a leader: {}", min_votes_needed);
 
         loop {
             let mut buffer = [0u8; 48];
@@ -101,7 +103,7 @@ impl Node {
                                         if vote == VoteResult::Accepted {
                                             nomination_accepted_count += 1;
                                         }
-                                        if nomination_accepted_count >= minimum_votes_needed {
+                                        if nomination_accepted_count >= min_votes_needed {
                                             tracing::info!("Node {} won the election", self.id);
                                             total_votes_received = 0;
                                             nomination_accepted_count = 0;
@@ -153,6 +155,18 @@ impl Node {
                         MainCommands::GetPeers { tx } => {
                             tx.send(peers.clone()).unwrap();
                         }
+                        MainCommands::CreateTopic { topic, tx } => {
+                            if topics.contains_key(&topic.name) {
+                                tx.send(NodeResponse::TopicAlreadyExists).unwrap();
+                            } else {
+                                topics.insert(topic.name.clone(), topic);
+                                //TODO: Find a leader node for the topic
+                                // Create lead partition
+                                // Create follower partitions
+                                // Send topic created response to client
+                                tx.send(NodeResponse::TopicCreated { leader_address: self.address.clone() }).unwrap();
+                            }
+                        }
                     }
                 },
                 _ = heartbeat_interval.tick() => {
@@ -164,13 +178,13 @@ impl Node {
                         }
                         NodeState::Candidate => if leader_node.is_none() {
                             tracing::info!("Node {} is candidate, term: {}", self.id, self.term);
-                            if max_vote_requests == 0 {
+                            if max_candidate_attempts == 0 {
                                 tracing::warn!("Node {} did not receive votes. Becoming follower.", self.id);
                                 self.state = NodeState::Follower;
-                                max_vote_requests = 20;
+                                max_candidate_attempts = 20;
                             } else {
                                 self.send_vote_request_to_peers(&peers, &node_socket).await;
-                                max_vote_requests -= 1;
+                                max_candidate_attempts -= 1;
                             }
                         }
                         NodeState::Leader => {
@@ -224,9 +238,43 @@ impl Node {
 mod should {
     use std::thread;
 
+    use crate::models::{NodeResponse, Topic};
+
     use super::*;
     use tokio::sync::oneshot;
     use tracing_test::traced_test;
+
+    #[tokio::test]
+    #[traced_test]
+    async fn create_a_new_topic() {
+        let mut test_node = Node::new("0.0.0.0:5075".to_string());
+        let (main_tx, main_rx) = mpsc::channel(1);
+        let cancellation_token = CancellationToken::new();
+        let ct_clone = cancellation_token.clone();
+
+        let handle = tokio::spawn(async move {
+            let peers = vec![
+                Node::new("peer_1".to_string()),
+                Node::new("peer_2".to_string()),
+            ];
+            test_node.run(10, peers, main_rx, ct_clone).await;
+        });
+
+        let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeResponse>();
+        let create_topic_command: MainCommands = MainCommands::CreateTopic {
+            topic: Topic::new("test_topic".to_string()),
+            tx: oneshot_tx,
+        };
+        main_tx.send(create_topic_command).await.unwrap();
+        match oneshot_rx.await.unwrap() {
+            NodeResponse::TopicCreated { leader_address } => {
+                assert_eq!(leader_address, "".to_string());
+            }
+            _ => panic!("Invalid response for create topic command"),
+        }
+        cancellation_token.cancel();
+        handle.abort();
+    }
 
     #[tokio::test]
     #[traced_test]
