@@ -1,6 +1,5 @@
 use common::enable_tracing;
-use models::MainCommands;
-use node::Node;
+use models::{MainCommands, Node};
 use rand::{thread_rng, Rng};
 use std::{process::Command, thread, time::Duration};
 use tokio::{signal, sync::mpsc};
@@ -9,8 +8,6 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 mod common;
 mod models;
 mod node;
-mod partition;
-mod topic_manager;
 
 // TODO: Read all the constants from a config file
 const NODE_MANAGER_PORT: u16 = 5056;
@@ -57,7 +54,7 @@ async fn main() {
     tracing::info!("Exiting main.");
 }
 
-fn get_cluster_info(pod_ip: &str, sleep_duration_seconds: Duration) -> Vec<String> {
+fn get_cluster_info(pod_ip: &str, sleep_duration_seconds: Duration) -> Vec<Node> {
     let mut try_count = 0;
     loop {
         let nodes: Vec<String> = dig_cluster_nodes(K8S_SERVICE_NAME, pod_ip);
@@ -76,7 +73,13 @@ fn get_cluster_info(pod_ip: &str, sleep_duration_seconds: Duration) -> Vec<Strin
             thread::sleep(sleep_duration_seconds);
         } else {
             tracing::info!("Found {} nodes in the cluster.", nodes.len());
-            return nodes;
+            return nodes
+                .iter()
+                .map(|peer_ip_address| {
+                    let peer_address = format!("{}:{}", peer_ip_address, NODE_MANAGER_PORT);
+                    Node::new(peer_address)
+                })
+                .collect::<Vec<Node>>();
         }
     }
 }
@@ -93,7 +96,6 @@ fn dig_cluster_nodes(service_name: &str, pod_ip: &str) -> Vec<String> {
             .split("\n")
             .map(|ip| ip.trim().to_string())
             .filter(|ip| !ip.is_empty() && ip != pod_ip)
-            .map(|ip| format!("{}:{}", ip, NODE_MANAGER_PORT))
             .collect()
     } else {
         Vec::new()

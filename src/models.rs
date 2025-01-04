@@ -13,16 +13,6 @@ pub enum ClientCommand {
     },
 }
 
-pub enum ClusterResponse {
-    TopicCreated {
-        topic_id: Uuid,
-        leader_address: String,
-    },
-    TopicAlreadyExists,
-    TopicNotFound,
-    TopicDeleted,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum VoteResult {
     Accepted,
@@ -38,7 +28,7 @@ pub enum MainCommands {
         tx: oneshot::Sender<NodeState>,
     },
     GetPeers {
-        tx: oneshot::Sender<Vec<String>>,
+        tx: oneshot::Sender<Vec<Node>>,
     },
 }
 
@@ -54,6 +44,15 @@ pub enum NodeCommand {
     RequetForVote { candidate_id: Uuid, term: u64 },
     VoteResponse { voter_id: Uuid, vote: VoteResult },
     Heartbeat { leader_id: Uuid, term: u64 },
-    AddPeer { peer_address: String },
-    RemovePeer { peer_address: String },
+    AddPeer { peer: Node },
+    RemovePeer { peer_id: Uuid },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Node {
+    pub id: Uuid,
+    pub address: String,
+    pub state: NodeState,
+    pub term: u64,
+    pub num_total_partitions: u32,
 }
