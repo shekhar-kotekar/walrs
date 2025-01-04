@@ -6,6 +6,9 @@ use uuid::Uuid;
 
 use crate::models::{MainCommands, Node, NodeCommand, NodeState, VoteResult};
 
+const MIN_HEARTBEAT_INTERVAL_MS: u64 = 10;
+const MAX_HEARTBEAT_INTERVAL_MS: u64 = 10000;
+
 impl Node {
     pub fn new(address: String) -> Node {
         //TODO: Read the number of partitions from file on disk
@@ -27,6 +30,14 @@ impl Node {
         let mut num_peers = u32::try_from(peers.len()).unwrap();
         assert_ne!(num_peers, 0, "At least one peer needed to start node.");
         assert_ne!(interval_ms, 0, "Interval must be greater than 0");
+        assert!(
+            interval_ms <= MAX_HEARTBEAT_INTERVAL_MS,
+            "Heartbeat Interval must be less than 10 seconds"
+        );
+        assert!(
+            interval_ms >= MIN_HEARTBEAT_INTERVAL_MS,
+            "Heartbeat Interval must be greater than 10 millis"
+        );
 
         tracing::info!(
             "Starting node {}, heartbeat interval: {} millis, address : {}",
@@ -220,7 +231,7 @@ mod should {
     #[tokio::test]
     #[traced_test]
     async fn test_node_run() {
-        let interval_ms: u64 = 25;
+        let interval_ms: u64 = 10;
         let mut test_node = Node::new("0.0.0.0:5055".to_string());
 
         let (node_tx, rx) = mpsc::channel(10);
