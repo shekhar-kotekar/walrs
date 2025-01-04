@@ -1,17 +1,16 @@
 use common::enable_tracing;
-use models::{NodeQuery, NodeState};
+use models::MainCommands;
 use node::Node;
 use rand::{thread_rng, Rng};
 use std::{process::Command, thread, time::Duration};
 use tokio::{signal, sync::mpsc};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
-use uuid::Uuid;
 
 mod common;
 mod models;
 mod node;
 mod partition;
-mod topic;
+mod topic_manager;
 
 // TODO: Read all the constants from a config file
 const NODE_MANAGER_PORT: u16 = 5056;
@@ -27,17 +26,14 @@ async fn main() {
     enable_tracing();
 
     let pod_ip: String = std::env::var("POD_IP").unwrap();
-    let mut local_node = Node {
-        id: Uuid::new_v4(),
-        state: NodeState::Follower,
-        term: 0,
-        address: format!("{}:{}", pod_ip, NODE_MANAGER_PORT),
-    };
+    let mut local_node = Node::new(format!("{}:{}", pod_ip, NODE_MANAGER_PORT));
     let task_tracker = TaskTracker::new();
     let cancellation_token = CancellationToken::new();
+
+    //TODO: How to get the list of peers from the cluster periodically?
     let peers = get_cluster_info(&pod_ip, Duration::from_secs(SLEEP_TIME_IN_SECONDS));
     let interval_ms = thread_rng().gen_range(100..HEARTBEAT_MAX_INTERVAL_MS);
-    let (_, rx) = mpsc::channel::<NodeQuery>(MPSC_MAX_Q_SIZE);
+    let (_, rx) = mpsc::channel::<MainCommands>(MPSC_MAX_Q_SIZE);
 
     let node_cancellation_token = cancellation_token.clone();
     task_tracker.spawn(async move {

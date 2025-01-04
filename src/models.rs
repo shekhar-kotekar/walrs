@@ -18,6 +18,9 @@ pub enum ClusterResponse {
         topic_id: Uuid,
         leader_address: String,
     },
+    TopicAlreadyExists,
+    TopicNotFound,
+    TopicDeleted,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -26,7 +29,7 @@ pub enum VoteResult {
     Rejected,
 }
 
-pub enum NodeQuery {
+pub enum MainCommands {
     GetState {
         tx: oneshot::Sender<NodeState>,
     },

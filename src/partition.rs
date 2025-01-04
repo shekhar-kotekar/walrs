@@ -1,14 +1,3 @@
-#[derive(Debug, PartialEq)]
-pub enum PartitionRole {
-    Leader,
-    Follower,
-}
-
-pub enum ParittionState {
-    InSync,
-    OutOfSync,
-}
-
 pub struct Partition {
     id: u8,
     role: PartitionRole,
@@ -34,6 +23,17 @@ impl Partition {
     pub fn add_peer(&mut self, peer: Partition) {
         self.peers.push(peer);
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum PartitionRole {
+    Leader,
+    Follower,
+}
+
+pub enum ParittionState {
+    InSync,
+    OutOfSync,
 }
 
 #[cfg(test)]
