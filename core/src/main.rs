@@ -2,7 +2,12 @@ use common::enable_tracing;
 use models::{MainCommands, Node};
 use rand::{thread_rng, Rng};
 use std::{process::Command, thread, time::Duration};
-use tokio::{signal, sync::mpsc};
+use tokio::{
+    io::AsyncReadExt,
+    net::{TcpListener, TcpStream},
+    signal,
+    sync::mpsc,
+};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 mod common;
@@ -12,7 +17,7 @@ mod partition;
 
 // TODO: Read all the constants from a config file
 const NODE_MANAGER_PORT: u16 = 5056;
-
+const WALRS_PORT: u16 = 5055;
 const MAX_RETRIES: u8 = 30;
 const SLEEP_TIME_IN_SECONDS: u64 = 5;
 const K8S_SERVICE_NAME: &str = "kraft-rs-service";
@@ -32,27 +37,50 @@ async fn main() {
     let peers = get_cluster_info(&pod_ip, Duration::from_secs(SLEEP_TIME_IN_SECONDS));
     let interval_ms = thread_rng().gen_range(100..HEARTBEAT_MAX_INTERVAL_MS);
     let (_, rx) = mpsc::channel::<MainCommands>(MPSC_MAX_Q_SIZE);
-
-    let node_cancellation_token = cancellation_token.clone();
+    let node_cancellation_token = cancellation_token.child_token();
     task_tracker.spawn(async move {
         local_node
             .run(interval_ms, peers, rx, node_cancellation_token)
             .await;
     });
 
-    match signal::ctrl_c().await {
-        Ok(_) => {
+    let main_tcp_listener = TcpListener::bind(format!("{}:{}", pod_ip, WALRS_PORT))
+        .await
+        .unwrap();
+
+    tokio::select! {
+        _ = async {
+            loop {
+                let (socket, _) = main_tcp_listener.accept().await.unwrap();
+                task_tracker.spawn(async move {
+                    process_request(socket).await;
+                });
+            }
+        } => {
+            tracing::info!("Main listener is closed.");
+        },
+        _ = signal::ctrl_c() => {
             tracing::info!("Received Ctrl-C signal. Cancelling all tasks.");
             cancellation_token.cancel();
             task_tracker.close();
             task_tracker.wait().await;
             tracing::info!("All tasks cancelled.");
         }
-        Err(e) => {
-            tracing::error!("Error occurred while waiting for Ctrl-C signal: {:?}", e);
-        }
     }
     tracing::info!("Exiting main.");
+}
+
+async fn process_request(socket: TcpStream) {
+    let mut buffer = [0; 1024];
+    match socket.read_buf(&mut buffer).await {
+        Ok(n) => {
+            let message = String::from_utf8_lossy(&buffer[..n]);
+            tracing::info!("Received message: {}", message);
+        }
+        Err(e) => {
+            tracing::error!("Error reading from stream: {:?}", e);
+        }
+    }
 }
 
 fn get_cluster_info(pod_ip: &str, sleep_duration_seconds: Duration) -> Vec<Node> {

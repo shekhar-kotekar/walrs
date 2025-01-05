@@ -161,6 +161,7 @@ impl Node {
                             } else {
                                 topics.insert(topic.name.clone(), topic);
                                 //TODO: Find a leader node for the topic
+                                // Try to distribute partitions equally among nodes
                                 // Create lead partition
                                 // Create follower partitions
                                 // Send topic created response to client
@@ -250,14 +251,14 @@ mod should {
         let mut test_node = Node::new("0.0.0.0:5075".to_string());
         let (main_tx, main_rx) = mpsc::channel(1);
         let cancellation_token = CancellationToken::new();
-        let ct_clone = cancellation_token.clone();
+        let node_ct = cancellation_token.child_token();
 
         let handle = tokio::spawn(async move {
             let peers = vec![
                 Node::new("peer_1".to_string()),
                 Node::new("peer_2".to_string()),
             ];
-            test_node.run(10, peers, main_rx, ct_clone).await;
+            test_node.run(10, peers, main_rx, node_ct).await;
         });
 
         let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeResponse>();
@@ -273,7 +274,7 @@ mod should {
             _ => panic!("Invalid response for create topic command"),
         }
         cancellation_token.cancel();
-        handle.abort();
+        handle.await.unwrap();
     }
 
     #[tokio::test]
@@ -284,7 +285,7 @@ mod should {
 
         let (node_tx, rx) = mpsc::channel(10);
         let cancellation_token = CancellationToken::new();
-        let ct_clone = cancellation_token.clone();
+        let ct_clone = cancellation_token.child_token();
 
         let handle = tokio::spawn(async move {
             let peers = vec![
@@ -316,7 +317,7 @@ mod should {
         assert_eq!(state, NodeState::Candidate);
 
         cancellation_token.cancel();
-        handle.abort();
+        handle.await.unwrap();
     }
 
     #[tokio::test]
@@ -328,7 +329,7 @@ mod should {
 
         let (tx, rx) = mpsc::channel(3);
         let cancellation_token = CancellationToken::new();
-        let ct_clone = cancellation_token.clone();
+        let node_ct = cancellation_token.child_token();
 
         let peer_1_socket = UdpSocket::bind(format!("0.0.0.0:5057")).await.unwrap();
         let peer_2_socket = UdpSocket::bind(format!("0.0.0.0:5058")).await.unwrap();
@@ -338,7 +339,7 @@ mod should {
                 Node::new("0.0.0.0:5057".to_string()),
                 Node::new("0.0.0.0:5058".to_string()),
             ];
-            test_node.run(interval_ms, peers, rx, ct_clone).await;
+            test_node.run(interval_ms, peers, rx, node_ct).await;
         });
 
         thread::sleep(Duration::from_millis(50));
@@ -391,7 +392,7 @@ mod should {
         assert_eq!(result, NodeState::Leader);
 
         cancellation_token.cancel();
-        handle.abort();
+        handle.await.unwrap();
     }
 
     #[tokio::test]
@@ -403,7 +404,7 @@ mod should {
 
         let (tx, rx) = mpsc::channel(3);
         let cancellation_token = CancellationToken::new();
-        let ct_clone = cancellation_token.clone();
+        let node_ct = cancellation_token.child_token();
 
         let peer_1_socket = UdpSocket::bind(format!("0.0.0.0:5060")).await.unwrap();
         let peer_2_socket = UdpSocket::bind(format!("0.0.0.0:5061")).await.unwrap();
@@ -413,7 +414,7 @@ mod should {
                 Node::new("0.0.0.0:5060".to_string()),
                 Node::new("0.0.0.0:5061".to_string()),
             ];
-            test_node.run(interval_ms, peers, rx, ct_clone).await;
+            test_node.run(interval_ms, peers, rx, node_ct).await;
         });
 
         let mut buffer = [0; 100];
@@ -463,7 +464,7 @@ mod should {
         assert_eq!(result, NodeState::Candidate);
 
         cancellation_token.cancel();
-        handle.abort();
+        handle.await.unwrap();
     }
 
     #[tokio::test]
@@ -480,7 +481,7 @@ mod should {
         };
         let (_, rx) = mpsc::channel(1);
         let cancellation_token = CancellationToken::new();
-        let ct_clone = cancellation_token.clone();
+        let node_ct = cancellation_token.child_token();
 
         let peer_1_socket = UdpSocket::bind(format!("0.0.0.0:5066")).await.unwrap();
         let peer_2_socket = UdpSocket::bind(format!("0.0.0.0:5067")).await.unwrap();
@@ -490,7 +491,7 @@ mod should {
                 Node::new("0.0.0.0:5066".to_string()),
                 Node::new("0.0.0.0:5067".to_string()),
             ];
-            test_node.run(interval_ms, peers, rx, ct_clone).await;
+            test_node.run(interval_ms, peers, rx, node_ct).await;
         });
 
         let expected_heartbeat = NodeCommand::Heartbeat {
@@ -508,6 +509,6 @@ mod should {
         assert_eq!(actual_message, expected_heartbeat);
 
         cancellation_token.cancel();
-        handle.abort();
+        handle.await.unwrap();
     }
 }

@@ -86,3 +86,23 @@ pub struct Partition {
     pub number: u8,
     pub topic_name: String,
 }
+
+const TWO_MB: usize = 2 * 1024 * 1024;
+pub struct Message {
+    data: [u8; TWO_MB],
+    topic_name: String,
+}
+
+pub enum ClientCommand {
+    CreateTopic {
+        topic_name: String,
+        num_partitions: u8,
+        retention_period_hours: u64,
+    },
+    Produce {
+        messages: Vec<Message>,
+    },
+    Consume {
+        topic_name: String,
+    },
+}
