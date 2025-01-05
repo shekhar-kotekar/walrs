@@ -8,7 +8,7 @@ metadata:
 apiVersion: v1
 kind: Service
 metadata:
-  name: kraft-rs-service
+  name: walrs-service
   namespace: ${PROJECT_NAME}
   labels:
     app: kraftrs
@@ -24,7 +24,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: kraft-rs-local-pv
+  name: walrs-local-pv
   namespace: ${PROJECT_NAME}
   labels:
     app: kraftrs
@@ -37,7 +37,7 @@ spec:
   - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
   local:
-    path: /tmp/kraft-rs/
+    path: /tmp/walrs/
   nodeAffinity:
     required:
       nodeSelectorTerms:

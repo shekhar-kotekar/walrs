@@ -1,6 +1,6 @@
 export CONFIG_FILE_PATH := config.toml
 
-export PROJECT_NAME := kraft-rs
+export PROJECT_NAME := walrs
 k8s_context := kind-kind
 IMAGE_REGISTRY := localhost:5001
 export GIT_COMMIT := $(shell git rev-parse --short HEAD)
@@ -63,7 +63,7 @@ deploy: replace_environment_variables
 redeploy: dockerize
 	@echo
 	@echo "INFO: Redeploying to k8s cluster"
-	kubectl rollout restart statefulset/kraft-rs-broker --namespace=${PROJECT_NAME}
+	kubectl rollout restart statefulset/${PROJECT_NAME}-broker --namespace=${PROJECT_NAME}
 
 teardown: set_kind_context
 	@echo "INFO: Deleting deployment"

@@ -1,12 +1,12 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: kraft-rs-broker
+  name: ${PROJECT_NAME}-broker
   namespace: ${PROJECT_NAME}
   labels:
     app: kraftrs
 spec:
-  serviceName: kraft-rs-service
+  serviceName: ${PROJECT_NAME}-service
   replicas: 5
   selector:
     matchLabels:
@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: kraftrs
-        image: localhost:5001/kraft-rs:${GIT_COMMIT}
+        image: localhost:5001/${PROJECT_NAME}:${GIT_COMMIT}
         env:
         - name: POD_IP
           valueFrom:
@@ -36,7 +36,7 @@ spec:
             cpu: "500m"
   volumeClaimTemplates:
   - metadata:
-      name: kraft-rs-pvc
+      name: ${PROJECT_NAME}-pvc
     spec:
       accessModes: [ "ReadWriteOnce" ]
       resources:
