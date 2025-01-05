@@ -1,1 +1,6 @@
 /target
+/logs
+/.idea
+/.vscode
+*.log
+.DS_Store

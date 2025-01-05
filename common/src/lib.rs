@@ -1,5 +1,10 @@
 use tracing_subscriber::fmt::format::FmtSpan;
 
+pub mod codecs;
+pub mod models;
+
+const TWO_MB: usize = 2 * 1024 * 1024;
+
 pub fn enable_tracing() {
     // let file_appender = tracing_appender::rolling::daily("/tmp/kraft-rs/logs/", "kraft-rs.log");
     // let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);

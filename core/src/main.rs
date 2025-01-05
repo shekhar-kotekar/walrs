@@ -1,16 +1,17 @@
-use common::enable_tracing;
+use common::{
+    enable_tracing,
+    models::{BrokerResponse, ClientCommand},
+};
 use models::{MainCommands, Node};
 use rand::{thread_rng, Rng};
 use std::{process::Command, thread, time::Duration};
 use tokio::{
-    io::AsyncReadExt,
     net::{TcpListener, TcpStream},
     signal,
     sync::mpsc,
 };
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
-mod common;
 mod models;
 mod node;
 mod partition;
@@ -36,11 +37,12 @@ async fn main() {
     //TODO: How to get the list of peers from the cluster periodically?
     let peers = get_cluster_info(&pod_ip, Duration::from_secs(SLEEP_TIME_IN_SECONDS));
     let interval_ms = thread_rng().gen_range(100..HEARTBEAT_MAX_INTERVAL_MS);
-    let (_, rx) = mpsc::channel::<MainCommands>(MPSC_MAX_Q_SIZE);
+    let (_, main_rx) = mpsc::channel::<MainCommands>(MPSC_MAX_Q_SIZE);
+
     let node_cancellation_token = cancellation_token.child_token();
     task_tracker.spawn(async move {
         local_node
-            .run(interval_ms, peers, rx, node_cancellation_token)
+            .run(interval_ms, peers, main_rx, node_cancellation_token)
             .await;
     });
 
@@ -71,11 +73,46 @@ async fn main() {
 }
 
 async fn process_request(socket: TcpStream) {
-    let mut buffer = [0; 1024];
-    match socket.read_buf(&mut buffer).await {
-        Ok(n) => {
-            let message = String::from_utf8_lossy(&buffer[..n]);
-            tracing::info!("Received message: {}", message);
+    let (reader, writer) = socket.into_split();
+    let mut buffer = [0u8; 48];
+    match reader.try_read(&mut buffer) {
+        Ok(0) => {
+            tracing::info!("Connection closed.");
+        }
+        Ok(bytes_read) => {
+            let client_command: ClientCommand =
+                bincode::deserialize(&buffer[..bytes_read]).unwrap();
+            match client_command {
+                ClientCommand::CreateTopic {
+                    topic_name,
+                    num_partitions,
+                    retention_period_hours,
+                } => {
+                    tracing::info!(
+                        "Received command to create topic: {} with {} partitions and retention period of {} hours.",
+                        topic_name,
+                        num_partitions,
+                        retention_period_hours
+                    );
+                }
+                ClientCommand::RequestToProduce { topic_name } => {
+                    tracing::info!("Received command to produce to topic: {}", topic_name);
+                    let response = bincode::serialize(&BrokerResponse::ProducerNotAcknowledged {
+                        topic_name: topic_name.clone(),
+                    });
+                    writer.try_write(&response.unwrap()).unwrap();
+                }
+                ClientCommand::RequestToStop { topic_name } => {
+                    tracing::info!(
+                        "Received command to stop producing to topic: {}",
+                        topic_name
+                    );
+                    let response = bincode::serialize(&BrokerResponse::ProducerStopAcknowledged {
+                        topic_name: topic_name.clone(),
+                    });
+                    writer.try_write(&response.unwrap()).unwrap();
+                }
+            }
         }
         Err(e) => {
             tracing::error!("Error reading from stream: {:?}", e);

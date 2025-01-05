@@ -81,7 +81,7 @@ impl Node {
                                             id:candidate_id,
                                             address:peer_address.ip().to_string(),
                                             state:NodeState::Leader,
-                                            term:term,
+                                            term,
                                             num_total_partitions: 0,
                                         });
                                         VoteResult::Accepted
