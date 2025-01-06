@@ -7,3 +7,9 @@ target/
 k8s/
 README.md
 *.yml
+*.yaml
+*.log
+/target
+.DS_Store
+/.idea
+/.vscode

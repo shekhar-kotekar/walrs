@@ -1,12 +1,13 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
-  name: kraft-rs-broker
-  namespace: kraft-rs
+  name: ${PROJECT_NAME}-broker
+  namespace: ${PROJECT_NAME}
   labels:
     app: kraftrs
 spec:
-  replicas: 3
+  serviceName: ${PROJECT_NAME}-service
+  replicas: 5
   selector:
     matchLabels:
       app: kraftrs
@@ -18,7 +19,7 @@ spec:
     spec:
       containers:
       - name: kraftrs
-        image: localhost:5001/kraft_rs:latest
+        image: localhost:5001/${PROJECT_NAME}:${GIT_COMMIT}
         env:
         - name: POD_IP
           valueFrom:
@@ -33,3 +34,11 @@ spec:
           limits:
             memory: "128Mi"
             cpu: "500m"
+  volumeClaimTemplates:
+  - metadata:
+      name: ${PROJECT_NAME}-pvc
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 256Mi
