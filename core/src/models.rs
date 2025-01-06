@@ -1,7 +1,23 @@
 use chrono::Duration;
+use common::models::MessageBatch;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 use uuid::Uuid;
+
+pub enum PartitionCommand {
+    WriteMessageBatch {
+        batch: MessageBatch,
+        response_tx: oneshot::Sender<PartitionResponse>,
+    },
+}
+
+#[derive(Debug, PartialEq)]
+pub enum PartitionResponse {
+    LeaderAcknowledged,
+    MajorityAcknowledged,
+    AllAcknowledged,
+    Error { message: String },
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum VoteResult {
@@ -80,9 +96,4 @@ impl Topic {
             leader_address: None,
         }
     }
-}
-
-pub struct Partition {
-    pub number: u8,
-    pub topic_name: String,
 }

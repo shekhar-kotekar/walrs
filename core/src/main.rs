@@ -14,7 +14,7 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 mod models;
 mod node;
-mod partition;
+mod partitions;
 
 // TODO: Read all the constants from a config file
 const NODE_MANAGER_PORT: u16 = 5056;
@@ -77,42 +77,45 @@ async fn process_request(socket: TcpStream) {
     let mut buffer = [0u8; 48];
     match reader.try_read(&mut buffer) {
         Ok(0) => {
-            tracing::info!("Connection closed.");
+            tracing::info!("Connection closed for: {}", reader.peer_addr().unwrap());
         }
         Ok(bytes_read) => {
             let client_command: ClientCommand =
                 bincode::deserialize(&buffer[..bytes_read]).unwrap();
-            match client_command {
+            let broker_response = match client_command {
                 ClientCommand::CreateTopic {
                     topic_name,
                     num_partitions,
                     retention_period_hours,
                 } => {
                     tracing::info!(
-                        "Received command to create topic: {} with {} partitions and retention period of {} hours.",
+                        "Received command to create topic '{}' with {} partitions and {} hours retention period.",
                         topic_name,
                         num_partitions,
                         retention_period_hours
                     );
+                    BrokerResponse::InternalError {
+                        message: "Not Implemented".to_string(),
+                    };
                 }
                 ClientCommand::RequestToProduce { topic_name } => {
                     tracing::info!("Received command to produce to topic: {}", topic_name);
-                    let response = bincode::serialize(&BrokerResponse::ProducerNotAcknowledged {
-                        topic_name: topic_name.clone(),
-                    });
-                    writer.try_write(&response.unwrap()).unwrap();
+                    BrokerResponse::InternalError {
+                        message: "Not Implemented".to_string(),
+                    };
                 }
                 ClientCommand::RequestToStop { topic_name } => {
                     tracing::info!(
                         "Received command to stop producing to topic: {}",
                         topic_name
                     );
-                    let response = bincode::serialize(&BrokerResponse::ProducerStopAcknowledged {
-                        topic_name: topic_name.clone(),
-                    });
-                    writer.try_write(&response.unwrap()).unwrap();
+                    BrokerResponse::InternalError {
+                        message: "Not Implemented".to_string(),
+                    };
                 }
-            }
+            };
+            let response = bincode::serialize(&broker_response);
+            writer.try_write(&response.unwrap()).unwrap();
         }
         Err(e) => {
             tracing::error!("Error reading from stream: {:?}", e);

@@ -44,18 +44,18 @@ replace_environment_variables: dockerize
 	@mkdir -p ./k8s/${GIT_COMMIT}
 	
 	@sed -e 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' \
-		 -e 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' < ./k8s/prerequisites.yml > ./k8s/${GIT_COMMIT}/prerequisites.yml
+		 -e 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' < ./core/k8s/prerequisites.yml > ./core/k8s/${GIT_COMMIT}/prerequisites.yml
 
 	@sed -e 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' \
-		 -e 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' < ./k8s/statefulset.yml > ./k8s/${GIT_COMMIT}/statefulset.yml
+		 -e 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' < ./core/k8s/statefulset.yml > ./core/k8s/${GIT_COMMIT}/statefulset.yml
 	
 	@echo "INFO: Environment variables replaced successfully!"
 
 deploy: replace_environment_variables
 	@echo
 	@echo "INFO: Deploying to k8s cluster"
-	kubectl apply -f ./k8s/${GIT_COMMIT}/prerequisites.yml
-	kubectl apply -f ./k8s/${GIT_COMMIT}/statefulset.yml
+	kubectl apply -f ./core/k8s/${GIT_COMMIT}/prerequisites.yml
+	kubectl apply -f ./core/k8s/${GIT_COMMIT}/statefulset.yml
 
 	@echo "INFO: Deployed successfully!"
 	kubectl get pods --namespace=${PROJECT_NAME}
@@ -67,10 +67,10 @@ redeploy: dockerize
 
 teardown: set_kind_context
 	@echo "INFO: Deleting deployment"
-	kubectl delete -f ./k8s/${GIT_COMMIT}/statefulset.yml
-	kubectl delete -f ./k8s/${GIT_COMMIT}/prerequisites.yml
+	kubectl delete -f ./core/k8s/${GIT_COMMIT}/statefulset.yml
+	kubectl delete -f ./core/k8s/${GIT_COMMIT}/prerequisites.yml
 
-	rm -rf ./k8s/${GIT_COMMIT}/
+	rm -rf ./core/k8s/${GIT_COMMIT}/
 
 	@echo "INFO: Deleted successfully!"
 	kubectl get namespaces

@@ -1,88 +1,94 @@
+use std::io;
+
 use bytes::{Buf, BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 
-use crate::{models::Message, TWO_MB};
+use crate::models::{Message, MessageBatch};
 
-pub struct MessageCodec;
+pub struct MessageBatchCodec;
 
-impl Encoder<Message> for MessageCodec {
-    type Error = std::io::Error;
+impl Encoder<MessageBatch> for MessageBatchCodec {
+    type Error = io::Error;
 
-    fn encode(&mut self, item: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        // Ensure we have enough space to write the entire message
-        dst.reserve(item.data.len() + 4 + item.topic_name.len());
+    fn encode(&mut self, item: MessageBatch, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.reserve(item.topic_name.len() + 1 + item.messages.len() * 4);
 
-        // Write the length of the data array
-        dst.put_u32(item.data.len() as u32);
+        dst.put_u8(item.topic_name.len() as u8);
+        dst.put_slice(item.topic_name.as_bytes());
 
-        // Write the data
-        dst.extend_from_slice(&item.data);
+        dst.put_u8(item.ack_level as u8);
 
-        dst.put_u32(item.topic_name.len() as u32);
-
-        // Write the client name
-        dst.extend_from_slice(item.topic_name.as_bytes());
-
+        dst.put_u8(item.messages.len() as u8);
+        for message in item.messages {
+            dst.put_u32(message.payload.len() as u32);
+            dst.put_slice(&message.payload);
+        }
         Ok(())
     }
 }
 
-impl Decoder for MessageCodec {
-    type Item = Message;
-    type Error = std::io::Error;
+impl Decoder for MessageBatchCodec {
+    type Item = MessageBatch;
+    type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if src.len() < 4 {
-            return Ok(None); // Not enough data to read data length
+        if src.len() < 1 {
+            return Ok(None);
         }
 
-        let data_len = src.get_u32() as usize;
-        if src.len() < data_len + 4 {
-            return Ok(None); // Not enough data for the data itself
+        let topic_name_len = src.get_u8() as usize;
+        let topic_name = src.split_to(topic_name_len).to_vec();
+
+        let ack_level = src.get_u8();
+
+        let num_messages = src.get_u8();
+        let mut messages = Vec::with_capacity(num_messages as usize);
+        for _ in 0..num_messages {
+            let payload_len = src.get_u32() as usize;
+            let payload = src.split_to(payload_len).to_vec();
+            messages.push(Message { payload });
         }
 
-        let data = src.split_to(data_len).to_vec();
-        let mut data_array = [0u8; TWO_MB];
-        data_array[..data_len].copy_from_slice(&data);
-
-        if src.len() < 4 {
-            return Ok(None); // Not enough data to read client name length
-        }
-
-        let topic_name_len = src.get_u32() as usize;
-        if src.len() < topic_name_len {
-            return Ok(None); // Not enough data for the client name
-        }
-
-        let topic_name = String::from_utf8(src.split_to(topic_name_len).to_vec())
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid UTF-8"))?;
-
-        Ok(Some(Message {
-            data: data_array,
-            topic_name,
+        Ok(Some(MessageBatch {
+            topic_name: String::from_utf8(topic_name).unwrap(),
+            ack_level: ack_level.into(),
+            messages,
         }))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use bytes::BytesMut;
+    use tokio_util::codec::Decoder;
+
+    use crate::models::AcknowledgementLevel;
+
+    use super::*;
 
     #[test]
-    fn encode_and_decode_message() {
-        let message = Message {
-            data: [0; TWO_MB],
-            topic_name: "test_topic".to_string(),
+    fn test_message_batch_codec() {
+        let mut codec = MessageBatchCodec;
+        let mut encoded_message_batch = BytesMut::new();
+
+        let message_batch = MessageBatch {
+            topic_name: "dummy_topic".to_string(),
+            ack_level: AcknowledgementLevel::Leader,
+            messages: vec![
+                Message {
+                    payload: "message_1_payload".as_bytes().to_vec(),
+                },
+                Message {
+                    payload: "message_2_payload".as_bytes().to_vec(),
+                },
+            ],
         };
 
-        let mut codec = MessageCodec;
-        let mut buf = BytesMut::new();
+        codec
+            .encode(message_batch.clone(), &mut encoded_message_batch)
+            .unwrap();
+        let decoded_message_batch = codec.decode(&mut encoded_message_batch).unwrap().unwrap();
 
-        codec.encode(message.clone(), &mut buf).unwrap();
-        let decoded_message = codec.decode(&mut buf).unwrap().unwrap();
-
-        assert_eq!(message.data.len(), decoded_message.data.len());
-        assert_eq!(message.topic_name, decoded_message.topic_name);
+        assert_eq!(message_batch, decoded_message_batch);
     }
 }
