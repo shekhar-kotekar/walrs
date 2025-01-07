@@ -20,7 +20,7 @@ impl PartitionLeader {
             tokio::select! {
                 Some(command) = main_rx.recv() => {
                     match command {
-                        PartitionCommand::WriteMessageBatch { batch, response_tx } => {
+                        PartitionCommand::Write { batch, response_tx } => {
                             let response = self.write_message_batch(batch).await;
                             response_tx.send(response).unwrap();
                         }
@@ -80,7 +80,7 @@ mod tests {
 
         let (oneshot_tx, oneshot_rx) = oneshot::channel::<PartitionResponse>();
         main_tx
-            .send(PartitionCommand::WriteMessageBatch {
+            .send(PartitionCommand::Write {
                 batch: message_batch,
                 response_tx: oneshot_tx,
             })
@@ -126,7 +126,7 @@ mod tests {
 
         let (oneshot_tx, oneshot_rx) = oneshot::channel::<PartitionResponse>();
         main_tx
-            .send(PartitionCommand::WriteMessageBatch {
+            .send(PartitionCommand::Write {
                 batch: message_batch,
                 response_tx: oneshot_tx,
             })
