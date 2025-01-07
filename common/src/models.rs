@@ -9,22 +9,22 @@ pub struct Message {
 pub struct MessageBatch {
     pub topic_name: String,
     pub messages: Vec<Message>,
-    pub ack_level: AcknowledgementLevel,
+    pub ack_level: AckLevel,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub enum AcknowledgementLevel {
-    Leader = 0,
-    Majority = 1,
-    All,
+pub enum AckLevel {
+    NoAck = 0,
+    Leader = 1,
+    All = 2,
 }
 
-impl From<u8> for AcknowledgementLevel {
+impl From<u8> for AckLevel {
     fn from(value: u8) -> Self {
         match value {
-            0 => AcknowledgementLevel::Leader,
-            1 => AcknowledgementLevel::Majority,
-            _ => AcknowledgementLevel::All,
+            0 => AckLevel::NoAck,
+            1 => AckLevel::Leader,
+            _ => AckLevel::All,
         }
     }
 }
