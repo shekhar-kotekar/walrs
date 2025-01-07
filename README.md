@@ -1,3 +1,21 @@
+# WAL-rs
+A bold attempt to implement Kafka in Rust.
+
+## Expected features:
+- [x] Cloud Native - We believe in standing on the shoulders of the giants and want to leverage Kubernetes heavily which means that
+we will make certain assumptions about the system like nodes will always run as a Pod in Kubernetes and not as a virtual machine.
+- [x] Kafka like message replication
+- [x] Raft based leader election
+- [x] WAL based message persistence
+- [x] Low resource consumption compared to Kafka
+- [x] High throughput than Kafka
+
+## Technologies Used:
+- Rust
+- Tokio
+- Docker
+- Kubernetes
+
 Raft reference: https://thesecretlivesofdata.com/raft/
 
 ## Unit testing
@@ -14,7 +32,7 @@ cargo test node_manager -- --nocapture
     - Check if all the three pods
         - [x] can communicate with each other over UDP
         - [x] accept one of the pod as a leader
-        - [x] change their state as follower  
+        - [x] change their state as follower
 
 - Milestone 2: Collision cases
     - [x] When should a node be considered a leader?
@@ -23,7 +41,7 @@ cargo test node_manager -- --nocapture
     - [x] How many times leader election should happen? infinitely?
 
 - Milestone 3:
-    - Find out if Kafka has 
+    - Find out if Kafka has
         - leader per Topic?
         - leader per partition?
 - Milestone 4:
