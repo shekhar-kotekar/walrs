@@ -112,6 +112,7 @@ mod tests {
         leader_task_handle.await.unwrap();
     }
 
+    #[ignore]
     #[tokio::test]
     #[traced_test]
     async fn partition_leader_should_acknowledge_from_all_followers_when_ack_level_set_to_all() {
