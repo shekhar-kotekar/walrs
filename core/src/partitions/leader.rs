@@ -7,15 +7,30 @@ use crate::models::{PartitionCommand, PartitionResponse};
 pub struct PartitionLeader {
     pub num_partition: u8,
     pub topic_name: String,
-    pub followers: Vec<String>,
+    in_sync_replicas: Vec<String>,
+    high_watermark: u64,
 }
 
 impl PartitionLeader {
+    pub fn new(num_partition: u8, topic_name: String) -> Self {
+        PartitionLeader {
+            num_partition,
+            topic_name,
+            in_sync_replicas: vec![],
+            high_watermark: 0,
+        }
+    }
+
     pub async fn start(
         &self,
         mut main_rx: mpsc::Receiver<PartitionCommand>,
         cancellation_token: CancellationToken,
     ) {
+        tracing::info!(
+            "Partition leader for {} topic, partition {} started.",
+            self.topic_name,
+            self.num_partition
+        );
         loop {
             tokio::select! {
                 Some(command) = main_rx.recv() => {
@@ -32,7 +47,13 @@ impl PartitionLeader {
                 }
             }
         }
+        tracing::info!(
+            "Partition leader for {} topic, partition {} stopped.",
+            self.topic_name,
+            self.num_partition
+        );
     }
+
     async fn write_message_batch(&self, batch: MessageBatch) -> PartitionResponse {
         PartitionResponse::LeaderAcknowledged
     }
@@ -52,11 +73,8 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn partition_leader_should_be_able_to_write_message_batches() {
-        let partition_leader = PartitionLeader {
-            num_partition: 0,
-            topic_name: "topic1".to_string(),
-            followers: vec![],
-        };
+        let partition_leader = PartitionLeader::new(0, "topic_1".to_string());
+
         let cancellation_token = CancellationToken::new();
         let (main_tx, main_rx) = mpsc::channel::<PartitionCommand>(1);
         let partition_leader_ct = cancellation_token.child_token();
@@ -72,7 +90,7 @@ mod tests {
                 payload: "message_2_payload".as_bytes().to_vec(),
             },
         ];
-        let message_batch = MessageBatch {
+        let batch = MessageBatch {
             topic_name: "topic1".to_string(),
             messages,
             ack_level: AckLevel::Leader,
@@ -81,7 +99,7 @@ mod tests {
         let (oneshot_tx, oneshot_rx) = oneshot::channel::<PartitionResponse>();
         main_tx
             .send(PartitionCommand::Write {
-                batch: message_batch,
+                batch,
                 response_tx: oneshot_tx,
             })
             .await
@@ -97,11 +115,7 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn partition_leader_should_acknowledge_from_all_followers_when_ack_level_set_to_all() {
-        let partition_leader = PartitionLeader {
-            num_partition: 0,
-            topic_name: "topic1".to_string(),
-            followers: vec![],
-        };
+        let partition_leader = PartitionLeader::new(0, "topic_1".to_string());
 
         let cancellation_token = CancellationToken::new();
         let (main_tx, main_rx) = mpsc::channel::<PartitionCommand>(1);
@@ -118,7 +132,7 @@ mod tests {
                 payload: "message_2_payload".as_bytes().to_vec(),
             },
         ];
-        let message_batch = MessageBatch {
+        let batch = MessageBatch {
             topic_name: "topic1".to_string(),
             messages,
             ack_level: AckLevel::All,
@@ -127,7 +141,7 @@ mod tests {
         let (oneshot_tx, oneshot_rx) = oneshot::channel::<PartitionResponse>();
         main_tx
             .send(PartitionCommand::Write {
-                batch: message_batch,
+                batch,
                 response_tx: oneshot_tx,
             })
             .await
