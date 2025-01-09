@@ -16,8 +16,6 @@ we will make certain assumptions about the system like nodes will always run as 
 - Docker
 - Kubernetes
 
-Raft reference: https://thesecretlivesofdata.com/raft/
-
 ## Unit testing
 ```
 cargo test <MODULE NAME> -- --nocapture
@@ -47,3 +45,8 @@ cargo test node_manager -- --nocapture
 - Milestone 4:
     - Implement WAL
     - Make WAL persisting to underlying storage
+
+### References:
+Raft: https://thesecretlivesofdata.com/raft/
+
+Kafka docs: https://docs.confluent.io/kafka/design/index.html
