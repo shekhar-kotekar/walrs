@@ -47,6 +47,6 @@ cargo test node_manager -- --nocapture
     - Make WAL persisting to underlying storage
 
 ### References:
+Kafka official docs:https://kafka.apache.org/24/documentation.html
+Confluent docs: https://docs.confluent.io/kafka/design/index.html
 Raft: https://thesecretlivesofdata.com/raft/
-
-Kafka docs: https://docs.confluent.io/kafka/design/index.html

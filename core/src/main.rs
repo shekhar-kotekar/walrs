@@ -25,6 +25,10 @@ const K8S_SERVICE_NAME: &str = "kraft-rs-service";
 const MPSC_MAX_Q_SIZE: usize = 100;
 const HEARTBEAT_MAX_INTERVAL_MS: u64 = 10000;
 
+// Main will be responsible for external facing communication like producer or consumer requests.
+// Internal communication will be handled by Node and partition managers.
+// So we will need 2-4 sockets in total.
+// Advantage of this approach is that Main thread does not need to manage all type of requests.
 #[tokio::main]
 async fn main() {
     enable_tracing();

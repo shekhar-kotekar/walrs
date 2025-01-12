@@ -11,6 +11,9 @@ use crate::models::{MainCommands, Node, NodeCommand, NodeResponse, NodeState, To
 const MIN_HEARTBEAT_INTERVAL_MS: u64 = 10;
 const MAX_HEARTBEAT_INTERVAL_MS: u64 = 10000;
 
+// TODO: Use type state pattern to manage the state of the node
+// Reference: https://zerotomastery.io/blog/rust-typestate-patterns/
+// https://www.youtube.com/watch?v=_ccDqRTx-JU
 impl Node {
     pub fn new(address: String) -> Node {
         //TODO: Read the number of partitions from file on disk
