@@ -1,6 +1,7 @@
 /target
 /logs
-/.idea
-/.vscode
+.idea/
+.vscode/
+.zed/
 *.log
 .DS_Store

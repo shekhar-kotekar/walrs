@@ -5,7 +5,7 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 pub enum PartitionCommand {
-    WriteMessageBatch {
+    Write {
         batch: MessageBatch,
         response_tx: oneshot::Sender<PartitionResponse>,
     },

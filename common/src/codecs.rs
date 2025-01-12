@@ -62,7 +62,7 @@ mod tests {
     use bytes::BytesMut;
     use tokio_util::codec::Decoder;
 
-    use crate::models::AcknowledgementLevel;
+    use crate::models::AckLevel;
 
     use super::*;
 
@@ -73,7 +73,7 @@ mod tests {
 
         let message_batch = MessageBatch {
             topic_name: "dummy_topic".to_string(),
-            ack_level: AcknowledgementLevel::Leader,
+            ack_level: AckLevel::Leader,
             messages: vec![
                 Message {
                     payload: "message_1_payload".as_bytes().to_vec(),

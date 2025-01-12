@@ -21,6 +21,6 @@ RUN apk add --no-cache bind-tools
 
 ARG module_name=kraft_rs
 
-COPY --from=builder /${module_name}/target/release/kraft_rs /kraft_rs
+COPY --from=builder /${module_name}/target/release/core /kraft_rs
 
 CMD [ "/kraft_rs" ]
