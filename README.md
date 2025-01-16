@@ -1,5 +1,10 @@
 # WAL-rs
-A bold attempt to implement Kafka in Rust.
+Highly opiniated attempt to implement Kafka in Rust.
+
+## Why are we building this?
+Apache Kafka is great but we can do better with Rust. Kafka consumes lot of resources and there are alternatives like RedPanda which can outperform. We are attempting to build Kafka using Rust to take advantage of Rust's awesome features like memory safety, being faster than Java and consuming less resources.
+
+In this process we are aiming to learn underlying algorithms, techniques and many more things.
 
 ## Expected features:
 - [x] Cloud Native - We believe in standing on the shoulders of the giants and want to leverage Kubernetes heavily which means that
@@ -38,15 +43,25 @@ cargo test node_manager -- --nocapture
         - [x] or when majority of nodes accept?
     - [x] How many times leader election should happen? infinitely?
 
-- Milestone 3:
-    - Find out if Kafka has
-        - leader per Topic?
-        - leader per partition?
+- Milestone 3: Client integration
+    - Understand how ISR work in Kafka and implement the functionality
+        - Implement ring buffer
+    - Implement Client SDK (if possible write Python wrapper using Pyo3)
+    - Deploy in k8s and test the results
 - Milestone 4:
     - Implement WAL
     - Make WAL persisting to underlying storage
+- Milestone 5:
+    - Performance testing
+        - Understand and learn how Kafka and RedPanda does stress and performance testing
+        - Create same testing setup
+        - Generate results
+- Milestone 6:
+    - TBD
 
 ### References:
 Kafka official docs:https://kafka.apache.org/24/documentation.html
+
 Confluent docs: https://docs.confluent.io/kafka/design/index.html
+
 Raft: https://thesecretlivesofdata.com/raft/
