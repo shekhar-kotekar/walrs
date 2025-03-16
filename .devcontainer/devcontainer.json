@@ -1,5 +1,3 @@
-// For format details, see https://aka.ms/devcontainer.json. For config options, see the
-// README at: https://github.com/devcontainers/templates/tree/main/src/rust
 {
 	"name": "Rust",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
@@ -14,7 +12,7 @@
 			"target": "/usr/local/cargo",
 			"type": "volume"
 		}
-	]
+	],
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
@@ -26,8 +24,16 @@
 	// "postCreateCommand": "rustc --version",
 
 	// Configure tool-specific properties.
-	// "customizations": {},
-
+	"customizations": {
+		"vscode": {
+		"extensions": [
+			"ms-python.python",
+			"rust-lang.rust-analyzer",
+			"usernamehw.errorlens",
+			"tamasfe.even-better-toml"
+		]
+    }
+}
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "root"
 }
