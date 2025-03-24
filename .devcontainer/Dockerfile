@@ -6,8 +6,6 @@ USER vscode
 
 RUN rustup update && cargo install cargo-watch
 
-RUN sudo chown -R $USER:$USER /usr/local/cargo/
-
 RUN echo "alias ll='ls -ltrh'" >> /home/vscode/.bashrc
 RUN echo "alias g=git" >> /home/vscode/.bashrc
 RUN echo "alias c=cargo" >> /home/vscode/.bashrc

@@ -21,7 +21,7 @@
   // "forwardPorts": [],
 
   // Use 'postCreateCommand' to run commands after the container is created.
-  // "postCreateCommand": "rustc --version",
+  "postCreateCommand": "sudo chown -R vscode:vscode /usr/local/cargo/",
 
   // Configure tool-specific properties.
   "customizations": {

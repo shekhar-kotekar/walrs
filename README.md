@@ -2,7 +2,7 @@
 Highly opinionated attempt to implement Kafka in Rust.
 
 ## Why are we building this?
-Apache Kafka is great but we can do better with Rust. Kafka consumes lot of resources and there are alternatives like RedPanda which can outperform. We are attempting to build Kafka using Rust to take advantage of Rust's awesome features like memory safety, being faster than Java and consuming less resources.
+Apache Kafka is great but we can do better using Rust. Kafka consumes lot of resources, there are alternatives like RedPanda which can outperform. We are attempting to build Kafka using Rust to take advantage of Rust's awesome features like memory safety, being faster than Java and consuming less resources.
 
 In this process we are aiming to learn underlying algorithms, techniques and many more things.
 
