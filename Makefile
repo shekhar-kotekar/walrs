@@ -35,10 +35,10 @@ build_image:
 	@echo "INFO: docker image built successfully!"
 	docker images
 
-push_image: set_kind_context dockerize
+push_image: set_kind_context build_image
 	docker push ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT}
 
-replace_environment_variables: dockerize
+replace_environment_variables: push_image
 	@echo "INFO: Replacing environment variables in k8s deployment file"
 	@echo "DEBUG: git_commit = $(GIT_COMMIT)"
 
@@ -60,7 +60,7 @@ deploy: replace_environment_variables
 	@echo "INFO: Deployed successfully!\n"
 	kubectl get pods --namespace=${PROJECT_NAME}
 
-redeploy: dockerize
+redeploy: replace_environment_variables
 	@echo
 	@echo "INFO: Redeploying to k8s cluster"
 	kubectl rollout restart statefulset/${PROJECT_NAME}-broker --namespace=${PROJECT_NAME}

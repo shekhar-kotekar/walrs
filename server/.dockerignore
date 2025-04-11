@@ -1,6 +1,7 @@
 Makefile
 Dockerfile
 target/
+k8s/
 .git/
 .gitignore
 .dockerignore
