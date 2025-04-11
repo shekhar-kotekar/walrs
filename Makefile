@@ -28,14 +28,15 @@ set_kind_context:
 	@echo "INFO: k8s context set to ${k8s_context}"
 	@echo
 
-dockerize: set_kind_context
+build_image:
 	@echo "INFO: Building docker image."
 	# --progress=plain
 	docker build --tag ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT} -f ./server/Dockerfile .
-	docker push ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT}
-
 	@echo "INFO: docker image built successfully!"
 	docker images
+
+push_image: set_kind_context dockerize
+	docker push ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT}
 
 replace_environment_variables: dockerize
 	@echo "INFO: Replacing environment variables in k8s deployment file"
