@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+use crate::node::Node;
+
 pub enum PartitionCommand {
     Write {
         batch: MessageBatch,
@@ -58,19 +60,11 @@ pub enum NodeCommand {
     RemovePeer { peer_id: Uuid },
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum NodeResponse {
     TopicCreated { leader_address: String },
     TopicAlreadyExists,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Node {
-    pub id: Uuid,
-    pub address: String,
-    pub state: NodeState,
-    pub term: u64,
-    pub num_total_partitions: u32,
+    NodeNotLeader { leader_address: String },
 }
 
 const TOPIC_DEFAULT_NUM_PARTITIONS: u8 = 3;

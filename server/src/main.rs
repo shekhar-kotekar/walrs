@@ -2,7 +2,8 @@ use common::{
     enable_tracing,
     models::{BrokerResponse, ClientCommand},
 };
-use models::{MainCommands, Node};
+use models::MainCommands;
+use node::Node;
 use rand::{thread_rng, Rng};
 use std::{process::Command, thread, time::Duration};
 use tokio::{
@@ -59,11 +60,11 @@ async fn main() {
             loop {
                 let (socket, _) = main_tcp_listener.accept().await.unwrap();
                 task_tracker.spawn(async move {
-                    process_request(socket).await;
+                    process_external_request(socket).await;
                 });
             }
         } => {
-            tracing::info!("Main listener is closed.");
+            tracing::info!("Main listener closed.");
         },
         _ = signal::ctrl_c() => {
             tracing::info!("Received Ctrl-C signal. Cancelling all tasks.");
@@ -76,7 +77,7 @@ async fn main() {
     tracing::info!("Exiting main.");
 }
 
-async fn process_request(socket: TcpStream) {
+async fn process_external_request(socket: TcpStream) {
     let (reader, writer) = socket.into_split();
     let mut buffer = [0u8; 48];
     match reader.try_read(&mut buffer) {

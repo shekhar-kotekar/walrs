@@ -33,15 +33,25 @@ impl Node {
         cancellation_token: CancellationToken,
     ) {
         let mut num_peers = u32::try_from(peers.len()).unwrap();
-        assert_ne!(num_peers, 0, "At least one peer needed to start node.");
-        assert_ne!(interval_ms, 0, "Interval must be greater than 0");
+        assert_ne!(
+            num_peers, 0,
+            "{}: At least one peer needed to start node.",
+            self.id
+        );
+        assert_ne!(
+            interval_ms, 0,
+            "{}: Interval must be greater than 0",
+            self.id
+        );
         assert!(
             interval_ms <= MAX_HEARTBEAT_INTERVAL_MS,
-            "Heartbeat Interval must be less than 10 seconds"
+            "{}: Heartbeat Interval must be less than 10 seconds",
+            self.id
         );
         assert!(
             interval_ms >= MIN_HEARTBEAT_INTERVAL_MS,
-            "Heartbeat Interval must be greater than 100 millis"
+            "{}: Heartbeat Interval must be greater than 100 millis",
+            self.id
         );
 
         tracing::info!(

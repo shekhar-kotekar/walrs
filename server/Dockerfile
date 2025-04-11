@@ -3,7 +3,7 @@ FROM docker.io/library/rust:alpine3.20 AS builder
 RUN rustup default stable
 RUN apk add --no-cache musl-dev libpq gcc
 
-ARG module_name=kraft_rs
+ARG module_name=walrs
 
 WORKDIR /${module_name}
 COPY Cargo.toml Cargo.lock /${module_name}/
@@ -19,8 +19,8 @@ FROM alpine:latest
 
 RUN apk add --no-cache bind-tools
 
-ARG module_name=kraft_rs
+ARG module_name=walrs
 
-COPY --from=builder /${module_name}/target/release/core /kraft_rs
+COPY --from=builder /${module_name}/target/release/server /walrs
 
-CMD [ "/kraft_rs" ]
+CMD [ "/walrs" ]
