@@ -1,14 +1,12 @@
 Makefile
 Dockerfile
 target/
-k8s/
+server/k8s/*.yml
+server/k8s/*.yaml
 .git/
 .gitignore
 .dockerignore
-k8s/
 README.md
-*.yml
-*.yaml
 *.log
 /target
 .DS_Store

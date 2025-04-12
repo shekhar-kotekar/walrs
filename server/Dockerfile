@@ -8,13 +8,12 @@ ARG module_name=walrs
 WORKDIR /${module_name}
 COPY Cargo.toml Cargo.lock /${module_name}/
 COPY . ./
-RUN echo $(ls -ltrh /${module_name})
+#RUN echo $(ls -ltrh /${module_name})
 
 RUN cargo test && cargo build --release
 
 RUN echo $(ls -ltrh /${module_name}/target/release/)
 
-#FROM scratch
 FROM alpine:latest
 
 RUN apk add --no-cache bind-tools

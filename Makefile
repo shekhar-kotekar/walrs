@@ -38,7 +38,7 @@ build_image:
 push_image: set_kind_context build_image
 	docker push ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT}
 
-replace_environment_variables: push_image
+replace_environment_variables:
 	@echo "INFO: Replacing environment variables in k8s deployment file"
 	@echo "DEBUG: git_commit = $(GIT_COMMIT)"
 
@@ -48,14 +48,20 @@ replace_environment_variables: push_image
 		 -e 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' < ./server/k8s/prerequisites.yml > ./server/k8s/${GIT_COMMIT}/prerequisites.yml
 
 	@sed -e 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' \
-		 -e 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' < ./server/k8s/statefulset.yml > ./server/k8s/${GIT_COMMIT}/statefulset.yml
+		 -e 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' < ./server/k8s/server.yml > ./server/k8s/${GIT_COMMIT}/server.yml
 
 	@echo "INFO: Environment variables replaced successfully!"
 
-deploy: replace_environment_variables
-	@echo "INFO: Deploying to k8s cluster\n"
+deploy:
+	@if [ "$(FAST)" = "true" ]; then \
+        echo "INFO: Fast mode enabled. Skipping build_image and push_image."; \
+        $(MAKE) replace_environment_variables; \
+    else \
+        $(MAKE) push_image replace_environment_variables; \
+    fi
+	@echo "INFO: Deploying to ${k8s_context} k8s cluster\n"
 	kubectl apply -f ./server/k8s/${GIT_COMMIT}/prerequisites.yml
-	kubectl apply -f ./server/k8s/${GIT_COMMIT}/statefulset.yml
+	kubectl apply -f ./server/k8s/${GIT_COMMIT}/server.yml
 
 	@echo "INFO: Deployed successfully!\n"
 	kubectl get pods --namespace=${PROJECT_NAME}
@@ -63,11 +69,11 @@ deploy: replace_environment_variables
 redeploy: replace_environment_variables
 	@echo
 	@echo "INFO: Redeploying to k8s cluster"
-	kubectl rollout restart statefulset/${PROJECT_NAME}-broker --namespace=${PROJECT_NAME}
+	kubectl rollout restart deployment/${PROJECT_NAME}-broker --namespace=${PROJECT_NAME}
 
 teardown: set_kind_context
 	@echo "INFO: Deleting deployment"
-	kubectl delete -f ./server/k8s/${GIT_COMMIT}/statefulset.yml
+	kubectl delete -f ./server/k8s/${GIT_COMMIT}/server.yml
 	kubectl delete -f ./server/k8s/${GIT_COMMIT}/prerequisites.yml
 
 	rm -rf ./server/k8s/${GIT_COMMIT}/

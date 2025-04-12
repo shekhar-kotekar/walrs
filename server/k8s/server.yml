@@ -1,26 +1,26 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: walrs-server
+  name: walrs-srvr
   namespace: walrs
   labels:
-    app: walrs-server
+    app: walrs-srvr
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
-      app: walrs-server
+      app: walrs-srvr
   template:
     metadata:
       labels:
-        app: walrs-server
+        app: walrs-srvr
     spec:
       containers:
       - name: walrs-server
-        image: localhost:5001/walrs_server:latest
+        image: localhost:5001/walrs:${GIT_COMMIT}
         ports:
         - containerPort: 8080
-          name: walrs-server-svc
+          name: walrs-srvr-svc
         resources:
           requests:
             memory: "32Mi"
@@ -28,11 +28,16 @@ spec:
           limits:
             memory: "128Mi"
             cpu: "500m"
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: walrs-server-service
+  name: walrs-srvr-service
   namespace: walrs
 spec:
   type: NodePort
@@ -40,6 +45,6 @@ spec:
   - protocol: TCP
     port: 8080
     nodePort: 30002
-    targetPort: walrs-server-svc
+    targetPort: walrs-srvr-svc
   selector:
-    app: walrs-server
+    app: walrs-srvr
