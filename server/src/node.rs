@@ -70,11 +70,11 @@ impl Node {
     async fn create_topic(&self, topic: &Topic, existing_topics: &Vec<String>) -> NodeResponse {
         // TODO: Check if the node is the leader before creating the topic
         if existing_topics.contains(&topic.name) {
-            return NodeResponse::TopicAlreadyExists;
+            NodeResponse::TopicAlreadyExists
         } else {
-            return NodeResponse::TopicCreated {
+            NodeResponse::TopicCreated {
                 leader_address: self.address.clone(),
-            };
+            }
         }
     }
 }

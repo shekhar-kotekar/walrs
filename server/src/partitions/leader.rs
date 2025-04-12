@@ -44,12 +44,10 @@ impl Leader {
         address: String,
         storage_path: Option<String>,
     ) -> Self {
-        let storage_base_path = if storage_path.is_none() {
+        let storage_base_path = storage_path.unwrap_or_else(|| {
             tracing::warn!("Storage path is not provided. Using default path.");
             STORAGE_DEFAULT_PATH.to_string()
-        } else {
-            storage_path.unwrap()
-        };
+        });
         let storage_path = format!(
             "{}/topic_{}/partition_{}",
             storage_base_path, topic_name, num_partition
@@ -79,7 +77,7 @@ impl Leader {
                 .start(segment_writer_rx, cancellation_token)
                 .await;
         });
-        return segment_writer_tx;
+        segment_writer_tx
     }
 
     pub async fn start(

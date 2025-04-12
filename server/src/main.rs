@@ -87,7 +87,7 @@ async fn process_external_request(socket: TcpStream) {
         Ok(bytes_read) => {
             let client_command: ClientCommand =
                 bincode::deserialize(&buffer[..bytes_read]).unwrap();
-            let broker_response = match client_command {
+            let broker_response: BrokerResponse = match client_command {
                 ClientCommand::CreateTopic {
                     topic_name,
                     num_partitions,
@@ -101,13 +101,13 @@ async fn process_external_request(socket: TcpStream) {
                     );
                     BrokerResponse::InternalError {
                         message: "Not Implemented".to_string(),
-                    };
+                    }
                 }
                 ClientCommand::RequestToProduce { topic_name } => {
                     tracing::info!("Received command to produce to topic: {}", topic_name);
                     BrokerResponse::InternalError {
                         message: "Not Implemented".to_string(),
-                    };
+                    }
                 }
                 ClientCommand::RequestToStop { topic_name } => {
                     tracing::info!(
@@ -116,7 +116,7 @@ async fn process_external_request(socket: TcpStream) {
                     );
                     BrokerResponse::InternalError {
                         message: "Not Implemented".to_string(),
-                    };
+                    }
                 }
             };
             let response = bincode::serialize(&broker_response);
