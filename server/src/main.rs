@@ -22,7 +22,7 @@ const NODE_MANAGER_PORT: u16 = 5056;
 const WALRS_PORT: u16 = 5055;
 const MAX_RETRIES: u8 = 30;
 const SLEEP_TIME_IN_SECONDS: u64 = 5;
-const K8S_SERVICE_NAME: &str = "kraft-rs-service";
+const K8S_SERVICE_NAME: &str = "walrs-srvr-service";
 const MPSC_MAX_Q_SIZE: usize = 100;
 const HEARTBEAT_MAX_INTERVAL_MS: u64 = 10000;
 
@@ -151,6 +151,7 @@ fn get_cluster_info(pod_ip: &str, sleep_duration_seconds: Duration) -> Vec<Node>
                 .iter()
                 .map(|peer_ip_address| {
                     let peer_address = format!("{}:{}", peer_ip_address, NODE_MANAGER_PORT);
+                    tracing::info!("peer address: {}", peer_address);
                     Node::new(peer_address)
                 })
                 .collect::<Vec<Node>>();
