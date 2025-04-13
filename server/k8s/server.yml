@@ -1,11 +1,12 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: walrs-srvr
   namespace: walrs
   labels:
     app: walrs-srvr
 spec:
+  serviceName: stateful-walrs
   replicas: 5
   selector:
     matchLabels:
@@ -19,7 +20,7 @@ spec:
       - name: walrs-server
         image: localhost:5001/walrs:${GIT_COMMIT}
         ports:
-        - containerPort: 8080
+        - containerPort: 5056
           name: walrs-srvr-svc
         resources:
           requests:
@@ -35,16 +36,39 @@ spec:
               fieldPath: status.podIP
 ---
 apiVersion: v1
+kind: Pod
+metadata:
+  name: ubuntu-debug-pod
+  namespace: walrs
+  labels:
+    app: ubuntu-debug
+spec:
+  containers:
+  - image: ubuntu:latest
+    command:
+    - "sleep"
+    - "3600"
+    imagePullPolicy: IfNotPresent
+    name: ubuntu-debug
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "250m"
+      limits:
+        memory: "128Mi"
+        cpu: "500m"
+---
+apiVersion: v1
 kind: Service
 metadata:
-  name: walrs-srvr-service
+  name: walrs-headless-service
   namespace: walrs
 spec:
-  type: NodePort
+  clusterIP: None
   ports:
-  - protocol: TCP
-    port: 8080
-    nodePort: 30002
+  - name: tcp
+    protocol: TCP
+    port: 5056
     targetPort: walrs-srvr-svc
   selector:
     app: walrs-srvr
