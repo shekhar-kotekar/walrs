@@ -86,7 +86,7 @@ impl Node {
         tracing::debug!("Minimum votes needed to be a leader: {}", min_votes_needed);
 
         loop {
-            let mut buffer = [0u8; 48];
+            let mut buffer = [0u8; 60];
             tokio::select! {
                 received_data = node_socket.recv_from(&mut buffer) => {
                     match received_data {
@@ -100,6 +100,7 @@ impl Node {
                                     if vote_result == VoteResult::Accepted {
                                             tracing::info!("** NEW LEADER ACCEPTED **: {} is a new leader with the term: {}", candidate_address, term);
                                             leader_node = Some(Node::new_leader(candidate_address.clone(), heartbeat_interval));
+                                            self.state = NodeState::Follower;
                                     }
                                     let node_response = NodeCommand::VoteResponse {
                                         voter_address: self.address.clone(),
@@ -205,7 +206,7 @@ impl Node {
                             tracing::info!("I am still a candidate. Address: {}, term: {}", self.address, self.term);
                             if self.nomination_accepted_count >= min_votes_needed {
                                 self.state = NodeState::Leader;
-                                tracing::info!("I am a leader now. Address: {}", self.address);
+                                tracing::info!("Got majority votes: {}. I am a leader now. Address: {}", self.nomination_accepted_count, self.address);
                                 leader_node = Some(Node::new_leader(self.address.clone(), self.sleep_interval));
                             } else {
 
