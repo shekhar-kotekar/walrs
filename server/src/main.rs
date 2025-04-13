@@ -4,6 +4,7 @@ use common::{
 };
 use models::MainCommands;
 use node::Node;
+use rand::{thread_rng, Rng};
 use std::{process::Command, thread, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -23,6 +24,8 @@ const MAX_RETRIES: u8 = 30;
 const SLEEP_TIME_IN_SECONDS: u64 = 5;
 const K8S_SERVICE_NAME: &str = "walrs-headless-service.walrs.svc.cluster.local";
 const MPSC_MAX_Q_SIZE: usize = 100;
+const MIN_HEARTBEAT_INTERVAL_MS: u64 = 10;
+const MAX_HEARTBEAT_INTERVAL_MS: u64 = 10000;
 
 // Main will be responsible for external facing communication like producer or consumer requests.
 // Internal communication will be handled by Node and partition managers.
@@ -33,7 +36,10 @@ async fn main() {
     enable_tracing();
 
     let pod_ip: String = std::env::var("POD_IP").unwrap();
-    let mut local_node = Node::new(format!("{}:{}", pod_ip, NODE_MANAGER_PORT));
+    let sleep_interval: u64 =
+        thread_rng().gen_range(MIN_HEARTBEAT_INTERVAL_MS..MAX_HEARTBEAT_INTERVAL_MS);
+    let node_address = format!("{}:{}", pod_ip, NODE_MANAGER_PORT);
+    let mut local_node = Node::new(node_address, sleep_interval);
     let task_tracker = TaskTracker::new();
     let cancellation_token = CancellationToken::new();
 
@@ -156,7 +162,7 @@ fn get_cluster_info(pod_ip: &str, sleep_duration_seconds: Duration) -> Vec<Node>
                 .map(|peer_ip_address| {
                     let peer_address = format!("{}:{}", peer_ip_address, NODE_MANAGER_PORT);
                     tracing::info!("peer address: {}", peer_address);
-                    Node::new(peer_address)
+                    Node::new(peer_address, 0)
                 })
                 .collect::<Vec<Node>>();
         }

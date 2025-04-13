@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
@@ -8,9 +7,6 @@ use tokio::time::{interval, sleep, Duration};
 use tokio_util::sync::CancellationToken;
 
 use crate::models::{MainCommands, NodeCommand, NodeResponse, NodeState, Topic, VoteResult};
-
-const MIN_HEARTBEAT_INTERVAL_MS: u64 = 10;
-const MAX_HEARTBEAT_INTERVAL_MS: u64 = 10000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Node {
@@ -25,15 +21,14 @@ pub struct Node {
 // Reference: https://zerotomastery.io/blog/rust-typestate-patterns/
 // https://www.youtube.com/watch?v=_ccDqRTx-JU
 impl Node {
-    pub fn new(address: String) -> Node {
+    pub fn new(address: String, sleep_interval: u64) -> Node {
         //TODO: Read the number of partitions from file on disk
         Node {
             address,
             state: NodeState::Follower,
             term: 0,
             num_total_partitions: 0,
-            sleep_interval: thread_rng()
-                .gen_range(MIN_HEARTBEAT_INTERVAL_MS..MAX_HEARTBEAT_INTERVAL_MS),
+            sleep_interval: sleep_interval,
         }
     }
     pub async fn run(
@@ -256,15 +251,16 @@ mod should {
     #[tokio::test]
     #[traced_test]
     async fn create_a_new_topic() {
-        let mut test_node = Node::new("0.0.0.0:5075".to_string());
+        let sleep_interval: u64 = 20;
+        let mut test_node = Node::new("0.0.0.0:5075".to_string(), sleep_interval);
         let (main_tx, main_rx) = mpsc::channel(1);
         let cancellation_token = CancellationToken::new();
         let node_ct = cancellation_token.child_token();
 
         let handle = tokio::spawn(async move {
             let peers = vec![
-                Node::new("peer_1".to_string()),
-                Node::new("peer_2".to_string()),
+                Node::new("peer_1".to_string(), sleep_interval),
+                Node::new("peer_2".to_string(), sleep_interval),
             ];
             test_node.run(peers, main_rx, node_ct).await;
         });
@@ -288,7 +284,8 @@ mod should {
     #[tokio::test]
     #[traced_test]
     async fn test_node_run() {
-        let mut test_node = Node::new("0.0.0.0:5055".to_string());
+        let sleep_interval: u64 = 20;
+        let mut test_node = Node::new("0.0.0.0:5055".to_string(), sleep_interval);
 
         let (node_tx, rx) = mpsc::channel(10);
         let cancellation_token = CancellationToken::new();
@@ -296,8 +293,8 @@ mod should {
 
         let handle = tokio::spawn(async move {
             let peers = vec![
-                Node::new("peer_1".to_string()),
-                Node::new("peer_2".to_string()),
+                Node::new("peer_1".to_string(), sleep_interval),
+                Node::new("peer_2".to_string(), sleep_interval),
             ];
             test_node.run(peers, rx, ct_clone).await;
         });
@@ -330,8 +327,8 @@ mod should {
     #[tokio::test]
     #[traced_test]
     async fn become_leader_if_enough_peers_accept_candidature() {
-        let interval_ms: u64 = 20;
-        let mut test_node = Node::new("0.0.0.0:5056".to_string());
+        let sleep_interval: u64 = 20;
+        let mut test_node = Node::new("0.0.0.0:5056".to_string(), sleep_interval);
 
         let (tx, rx) = mpsc::channel(3);
         let cancellation_token = CancellationToken::new();
@@ -342,8 +339,8 @@ mod should {
 
         let handle = tokio::spawn(async move {
             let peers = vec![
-                Node::new("0.0.0.0:5057".to_string()),
-                Node::new("0.0.0.0:5058".to_string()),
+                Node::new("0.0.0.0:5057".to_string(), sleep_interval),
+                Node::new("0.0.0.0:5058".to_string(), sleep_interval),
             ];
             test_node.run(peers, rx, node_ct).await;
         });
@@ -389,7 +386,7 @@ mod should {
             .unwrap();
 
         tracing::debug!("Peers have accepted the candidature");
-        tokio::time::sleep(Duration::from_millis(interval_ms * 2)).await;
+        tokio::time::sleep(Duration::from_millis(sleep_interval * 2)).await;
 
         let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeState>();
         let get_state_query = MainCommands::GetState { tx: oneshot_tx };
@@ -404,8 +401,9 @@ mod should {
     #[tokio::test]
     #[traced_test]
     async fn become_follower_if_majority_peers_do_not_accept_as_a_leader() {
+        let sleep_interval: u64 = 20;
         let test_node_address = "0.0.0.0:5059".to_string();
-        let mut test_node = Node::new(test_node_address.clone());
+        let mut test_node = Node::new(test_node_address.clone(), sleep_interval);
 
         let (tx, rx) = mpsc::channel(3);
         let cancellation_token = CancellationToken::new();
@@ -416,8 +414,8 @@ mod should {
 
         let handle = tokio::spawn(async move {
             let peers = vec![
-                Node::new("0.0.0.0:5060".to_string()),
-                Node::new("0.0.0.0:5061".to_string()),
+                Node::new("0.0.0.0:5060".to_string(), sleep_interval),
+                Node::new("0.0.0.0:5061".to_string(), sleep_interval),
             ];
             test_node.run(peers, rx, node_ct).await;
         });
@@ -462,7 +460,7 @@ mod should {
         let get_state_query = MainCommands::GetState { tx: oneshot_tx };
         tx.send(get_state_query).await.unwrap();
         let result = oneshot_rx.await.unwrap();
-        assert_eq!(result, NodeState::Follower);
+        assert_eq!(result, NodeState::Candidate);
 
         cancellation_token.cancel();
         handle.await.unwrap();
@@ -471,13 +469,13 @@ mod should {
     #[tokio::test]
     #[traced_test]
     async fn send_heartbeat_signal_to_peers() {
-        let interval_ms: u64 = 20;
+        let sleep_interval: u64 = 20;
         let mut test_node = Node {
             address: "0.0.0.0:5065".to_string(),
             state: NodeState::Leader,
             term: 1,
             num_total_partitions: 0,
-            sleep_interval: interval_ms,
+            sleep_interval: sleep_interval,
         };
         let (_, rx) = mpsc::channel(1);
         let cancellation_token = CancellationToken::new();
@@ -488,8 +486,8 @@ mod should {
 
         let handle = tokio::spawn(async move {
             let peers = vec![
-                Node::new("0.0.0.0:5066".to_string()),
-                Node::new("0.0.0.0:5067".to_string()),
+                Node::new("0.0.0.0:5066".to_string(), sleep_interval),
+                Node::new("0.0.0.0:5067".to_string(), sleep_interval),
             ];
             test_node.run(peers, rx, node_ct).await;
         });
