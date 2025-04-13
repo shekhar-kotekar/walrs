@@ -3,10 +3,12 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
-use tokio::time::{interval, sleep, Duration};
+use tokio::time::{interval, Duration};
 use tokio_util::sync::CancellationToken;
 
-use crate::models::{MainCommands, NodeCommand, NodeResponse, NodeState, Topic, VoteResult};
+use crate::models::{
+    MainCommands, NodeCommand, NodeResponse, NodeState, Topic, VoteRejectionReason, VoteResult,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Node {
@@ -15,6 +17,9 @@ pub struct Node {
     pub term: u64,
     pub num_total_partitions: u32,
     sleep_interval: u64,
+    total_votes_received: u32,
+    nomination_accepted_count: u32,
+    max_candidate_attempts: u32,
 }
 
 // TODO: Use type state pattern to manage the state of the node
@@ -29,8 +34,26 @@ impl Node {
             term: 0,
             num_total_partitions: 0,
             sleep_interval: sleep_interval,
+            total_votes_received: 0,
+            nomination_accepted_count: 0,
+            max_candidate_attempts: 20,
         }
     }
+
+    pub fn new_leader(address: String, sleep_interval: u64) -> Node {
+        //TODO: Read the number of partitions from file on disk
+        Node {
+            address,
+            state: NodeState::Leader,
+            term: 0,
+            num_total_partitions: 0,
+            sleep_interval: sleep_interval,
+            total_votes_received: 0,
+            nomination_accepted_count: 0,
+            max_candidate_attempts: 20,
+        }
+    }
+
     pub async fn run(
         &mut self,
         mut peers: Vec<Node>,
@@ -55,9 +78,9 @@ impl Node {
         let mut heartbeat_interval = interval(Duration::from_millis(self.sleep_interval));
         let node_socket = UdpSocket::bind(&self.address).await.unwrap();
 
-        let mut total_votes_received = 0;
-        let mut nomination_accepted_count = 0;
-        let mut max_candidate_attempts = 10;
+        // let mut total_votes_received = 0;
+        // let mut nomination_accepted_count = 0;
+        // let mut max_candidate_attempts = 10;
         let mut leader_node: Option<Node> = None;
         let mut topics: HashMap<String, Topic> = HashMap::new();
         let mut last_heartbeat_from_leader = tokio::time::Instant::now();
@@ -75,54 +98,40 @@ impl Node {
                             match command {
                                 NodeCommand::RequetForVote { candidate_address, heartbeat_interval, term } => {
                                     let cluster_has_leader: bool = leader_node.is_some();
+                                    tracing::info!("leader node details: {:?}", leader_node);
                                     let vote_result: VoteResult = self.handle_request_for_vote(&candidate_address, term, cluster_has_leader).await;
-                                    match vote_result {
-                                        VoteResult::Accepted => {
+                                    if vote_result == VoteResult::Accepted {
                                             tracing::info!("** NEW LEADER ACCEPTED **: {} is a new leader with the term: {}", candidate_address, term);
-                                            leader_node = Some(
-                                                Node {
-                                                    address: candidate_address.clone(),
-                                                    state: NodeState::Leader,
-                                                    term,
-                                                    num_total_partitions: 0,
-                                                    sleep_interval: heartbeat_interval,
-                                                }
-                                            );
-                                        }
-                                        VoteResult::Rejected => {
-                                            tracing::info!("Vote rejected for {}", candidate_address);
-                                        }
+                                            leader_node = Some(Node::new_leader(candidate_address.clone(), heartbeat_interval));
                                     }
                                     let node_response = NodeCommand::VoteResponse {
                                         voter_address: self.address.clone(),
-                                        vote: vote_result,
+                                        vote_result,
                                     };
                                     let serialized_vote_result = bincode::serialize(&node_response).unwrap();
                                     let _ = node_socket
                                         .send_to(&serialized_vote_result, peer_address)
                                         .await;
                                 }
-                                NodeCommand::VoteResponse { voter_address, vote } => {
-                                    tracing::info!("Received vote response '{:?}' from {}", vote, voter_address);
-                                    if self.state == NodeState::Candidate {
-                                        total_votes_received += 1;
-                                        if vote == VoteResult::Accepted {
-                                            nomination_accepted_count += 1;
+                                NodeCommand::VoteResponse { voter_address, vote_result } => {
+                                    self.total_votes_received += 1;
+                                    match vote_result {
+                                        VoteResult::Accepted => {
+                                            tracing::info!("Vote accepted from {}", voter_address);
+                                            self.nomination_accepted_count += 1;
                                         }
-                                        if nomination_accepted_count >= min_votes_needed {
-                                            tracing::info!("{} voters accepted nomination.This node {} won the election", nomination_accepted_count, self.address);
-                                            total_votes_received = 0;
-                                            nomination_accepted_count = 0;
-                                            self.state = NodeState::Leader;
-                                        } else if total_votes_received >= num_peers {
-                                            tracing::info!("This node {} lost the election", self.address);
-                                            total_votes_received = 0;
-                                            nomination_accepted_count = 0;
-                                            self.state = NodeState::Follower;
-                                            sleep(Duration::from_millis(self.sleep_interval)).await;
+                                        VoteResult::Rejected { reason } => {
+                                            tracing::info!("Vote rejected from {}. Reason: {:?}", voter_address, reason);
+                                            match reason {
+                                                VoteRejectionReason::LeaderAlreadyExists { leader_address, leader_heartbeat_interval } => {
+                                                    tracing::info!("Cluster already has a leader: {}", leader_address);
+                                                    leader_node = Some(Node::new_leader(leader_address, leader_heartbeat_interval));
+                                                }
+                                                _ => {
+                                                    tracing::info!("Vote rejected from {}. Reason: {:?}", voter_address, reason);
+                                                }
+                                            }
                                         }
-                                    } else {
-                                        tracing::warn!("Received vote response from {} but I am not a candidate", voter_address);
                                     }
                                 }
                                 NodeCommand::AddPeer { peer } => {
@@ -183,6 +192,11 @@ impl Node {
                             } else {
                                 let leader_details = leader_node.as_ref().unwrap();
                                 tracing::info!("This node {} is a follower and has a leader: {}", self.address, leader_details.address);
+                                tracing::debug!("last heartbeat from leader: {:?}, elapsed time since last heartbeat from leader: {:?}, leader sleep interval: {}",
+                                    last_heartbeat_from_leader,
+                                    last_heartbeat_from_leader.elapsed(),
+                                    leader_details.sleep_interval);
+
                                 if last_heartbeat_from_leader.elapsed() > Duration::from_millis(leader_details.sleep_interval * 2) {
                                     tracing::info!("Leader {} hasn't sent heartbeat in a while. I am becoming a candidate.", leader_details.address);
                                     leader_node = None;
@@ -190,19 +204,26 @@ impl Node {
                                 }
                             }
                         }
-                        NodeState::Candidate => if leader_node.is_none() {
-                            if max_candidate_attempts == 0 {
-                                tracing::warn!("Node {} did not receive votes. Becoming follower.", self.address);
-                                self.state = NodeState::Follower;
-                                max_candidate_attempts = 20;
+                        NodeState::Candidate => {
+                            if self.nomination_accepted_count >= min_votes_needed {
+                                tracing::info!("I am a leader now. Address: {}", self.address);
+                                self.state = NodeState::Leader;
+                                leader_node = Some(Node::new_leader(self.address.clone(), self.sleep_interval));
                             } else {
-                                self.send_vote_request_to_peers(&peers, &node_socket).await;
-                                max_candidate_attempts -= 1;
+                                tracing::info!("I am still a candidate. Address: {}", self.address);
+                                if self.max_candidate_attempts == 0 {
+                                    tracing::warn!("I {} did not receive votes. Becoming follower.", self.address);
+                                    self.state = NodeState::Follower;
+                                    self.max_candidate_attempts = 20;
+                                } else {
+                                    self.send_vote_request_to_peers(&peers, &node_socket).await;
+                                    self.max_candidate_attempts -= 1;
+                                }
                             }
                         }
                         NodeState::Leader => {
-                            total_votes_received = 0;
-                            nomination_accepted_count = 0;
+                            self.total_votes_received = 0;
+                            self.nomination_accepted_count = 0;
                             self.send_heartbeat(&peers, &node_socket).await;
                         }
                     }
@@ -221,22 +242,45 @@ impl Node {
         candidate_term: u64,
         cluster_has_leader: bool,
     ) -> VoteResult {
-        tracing::info!("received vote request from {}", candidate_address);
+        tracing::info!(
+            "received vote request. candidate address: {}, term: {}",
+            candidate_address,
+            candidate_term
+        );
         if self.state == NodeState::Leader {
             tracing::info!(
                 "I am already a leader. Rejecting vote request from {}",
                 candidate_address
             );
-            return VoteResult::Rejected;
-        }
-        if cluster_has_leader {
+            VoteResult::Rejected {
+                reason: VoteRejectionReason::LeaderAlreadyExists {
+                    leader_address: self.address.clone(),
+                    leader_heartbeat_interval: self.sleep_interval,
+                },
+            }
+        } else if cluster_has_leader {
             tracing::info!("Cluster already has a leader. Rejecting vote request.");
-            VoteResult::Rejected
+            VoteResult::Rejected {
+                reason: VoteRejectionReason::LeaderAlreadyExists {
+                    leader_address: self.address.clone(),
+                    leader_heartbeat_interval: self.sleep_interval,
+                },
+            }
         } else {
             if candidate_term > self.term {
                 VoteResult::Accepted
             } else {
-                VoteResult::Rejected
+                tracing::info!(
+                    "Candidate {} has a lower term {} than my term {}. Rejecting its vote request.",
+                    candidate_address,
+                    candidate_term,
+                    self.term
+                );
+                VoteResult::Rejected {
+                    reason: VoteRejectionReason::LowerTerm {
+                        term: candidate_term,
+                    },
+                }
             }
         }
     }
@@ -386,7 +430,7 @@ mod should {
         let mut buffer = [0; 100];
         let vote_result = NodeCommand::VoteResponse {
             voter_address: "0.0.0.0:5057".to_string(),
-            vote: VoteResult::Accepted,
+            vote_result: VoteResult::Accepted,
         };
 
         let (bytes_count, peer_address) = peer_1_socket.recv_from(&mut buffer).await.unwrap();
@@ -461,7 +505,9 @@ mod should {
         let mut buffer = [0; 100];
         let reject_leader_command = NodeCommand::VoteResponse {
             voter_address: "0.0.0.0:5060".to_string(),
-            vote: VoteResult::Rejected,
+            vote_result: VoteResult::Rejected {
+                reason: VoteRejectionReason::LowerTerm { term: 1 },
+            },
         };
         let reject_leader_message = bincode::serialize(&reject_leader_command).unwrap();
 
@@ -485,7 +531,9 @@ mod should {
         assert_eq!(message_from_candidate, expected_message_from_candidate);
         let reject_leader_command = NodeCommand::VoteResponse {
             voter_address: "0.0.0.0:5061".to_string(),
-            vote: VoteResult::Rejected,
+            vote_result: VoteResult::Rejected {
+                reason: VoteRejectionReason::LowerTerm { term: 1 },
+            },
         };
         let reject_leader_message = bincode::serialize(&reject_leader_command).unwrap();
         peer_2_socket
@@ -509,13 +557,14 @@ mod should {
     #[traced_test]
     async fn send_heartbeat_signal_to_peers() {
         let sleep_interval: u64 = 20;
-        let mut test_node = Node {
-            address: "0.0.0.0:5065".to_string(),
-            state: NodeState::Leader,
-            term: 1,
-            num_total_partitions: 0,
-            sleep_interval: sleep_interval,
-        };
+        // let mut test_node = Node {
+        //     address: "0.0.0.0:5065".to_string(),
+        //     state: NodeState::Leader,
+        //     term: 1,
+        //     num_total_partitions: 0,
+        //     sleep_interval: sleep_interval,
+        // };
+        let mut leader_node = Node::new_leader("0.0.0.0:5065".to_string(), sleep_interval);
         let (_, rx) = mpsc::channel(1);
         let cancellation_token = CancellationToken::new();
         let node_ct = cancellation_token.child_token();
@@ -528,7 +577,7 @@ mod should {
                 Node::new("0.0.0.0:5066".to_string(), sleep_interval),
                 Node::new("0.0.0.0:5067".to_string(), sleep_interval),
             ];
-            test_node.run(peers, rx, node_ct).await;
+            leader_node.run(peers, rx, node_ct).await;
         });
 
         let expected_heartbeat = NodeCommand::Heartbeat {

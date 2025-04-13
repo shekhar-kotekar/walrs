@@ -1,30 +1,25 @@
 use chrono::Duration;
-use common::models::MessageBatch;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::node::Node;
 
-pub enum PartitionCommand {
-    Write {
-        batch: MessageBatch,
-        response_tx: oneshot::Sender<PartitionResponse>,
-    },
-}
-
-#[derive(Debug, PartialEq)]
-pub enum PartitionResponse {
-    LeaderAcknowledged,
-    MajorityAcknowledged,
-    AllAcknowledged,
-    Error { message: String },
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum VoteResult {
     Accepted,
-    Rejected,
+    Rejected { reason: VoteRejectionReason },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum VoteRejectionReason {
+    LeaderAlreadyExists {
+        leader_address: String,
+        leader_heartbeat_interval: u64,
+    },
+    LowerTerm {
+        term: u64,
+    },
 }
 
 pub enum MainCommands {
@@ -60,7 +55,7 @@ pub enum NodeCommand {
     },
     VoteResponse {
         voter_address: String,
-        vote: VoteResult,
+        vote_result: VoteResult,
     },
     Heartbeat {
         leader_address: String,

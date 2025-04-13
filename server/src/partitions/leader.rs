@@ -6,12 +6,9 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{
-    models::{PartitionCommand, PartitionResponse},
-    partitions::{
-        replica::ReplicaRequest,
-        segment_writer::{SegmentWriter, SegmentWriterCommand},
-    },
+use crate::partitions::{
+    replica::ReplicaRequest,
+    segment_writer::{SegmentWriter, SegmentWriterCommand},
 };
 
 use super::segment_writer::SegmentWriterResponse;
@@ -19,6 +16,21 @@ use super::segment_writer::SegmentWriterResponse;
 const BUFFER_SIZE: usize = 256;
 const STORAGE_DEFAULT_PATH: &str = "/tmp";
 const SEGMENT_WRITER_CHANNEL_SIZE: usize = 1024;
+
+pub enum PartitionCommand {
+    Write {
+        batch: MessageBatch,
+        response_tx: oneshot::Sender<PartitionResponse>,
+    },
+}
+
+#[derive(Debug, PartialEq)]
+pub enum PartitionResponse {
+    LeaderAcknowledged,
+    MajorityAcknowledged,
+    AllAcknowledged,
+    Error { message: String },
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LeaderResponse {
@@ -170,8 +182,6 @@ mod tests {
     use tokio::sync::{mpsc, oneshot};
     use tokio_util::sync::CancellationToken;
     use tracing_test::traced_test;
-
-    use crate::models::{PartitionCommand, PartitionResponse};
 
     use super::*;
 
