@@ -80,7 +80,7 @@ impl Node {
                                         self.state = NodeState::Follower;
                                     }
                                     let vote_result = if self.state != NodeState::Leader && leader_node.is_none() {
-                                        tracing::info!("accepted {} as leader.", peer_ip);
+                                        tracing::info!("Accepted {} as leader.", peer_ip);
 
                                         leader_node = Some(Node {
                                             address:peer_ip,
@@ -89,6 +89,7 @@ impl Node {
                                             num_total_partitions: 0,
                                             sleep_interval: 0
                                         });
+                                        self.state = NodeState::Follower;
                                         VoteResult::Accepted
                                     } else {
                                         tracing::info!("rejected {} as leader.", peer_ip);
@@ -121,7 +122,7 @@ impl Node {
                                             sleep(Duration::from_millis(self.sleep_interval)).await;
                                         }
                                     } else {
-                                        tracing::warn!("received vote response from {} but I am not a candidate", voter_address);
+                                        tracing::warn!("Received vote response from {} but I am not a candidate", voter_address);
                                     }
                                 }
                                 NodeCommand::AddPeer { peer } => {
@@ -176,10 +177,10 @@ impl Node {
                     }
                 },
                 _ = heartbeat_interval.tick() => {
-                    tracing::info!("Node {}, state: {:?}", self.address, self.state);
                     match self.state {
                         NodeState::Follower => if leader_node.is_none() {
                             tokio::time::sleep(Duration::from_millis(self.sleep_interval)).await;
+                            tracing::info!("This node {}, state: {:?} and no leader. Will become candidate", self.address, self.state);
                             self.become_candidate();
                         }
                         NodeState::Candidate => if leader_node.is_none() {
@@ -208,7 +209,10 @@ impl Node {
     }
 
     async fn send_heartbeat(&self, peers: &Vec<Node>, socket: &UdpSocket) {
-        tracing::info!("sending heartbeat to peers.");
+        tracing::info!(
+            "I am leader, term: {}. Sending heartbeat to peers.",
+            self.term
+        );
         let message_to_peers = bincode::serialize(&NodeCommand::Heartbeat {
             leader_address: self.address.clone(),
             term: self.term,
