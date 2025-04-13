@@ -69,7 +69,7 @@ deploy:
 redeploy: replace_environment_variables
 	@echo
 	@echo "INFO: Redeploying to k8s cluster"
-	kubectl rollout restart deployment/${PROJECT_NAME}-broker --namespace=${PROJECT_NAME}
+	@kubectl rollout restart statefulset ${PROJECT_NAME}-srvr --namespace=${PROJECT_NAME}
 
 teardown: set_kind_context
 	@echo "INFO: Deleting deployment"
