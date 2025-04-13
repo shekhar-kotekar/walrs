@@ -29,6 +29,14 @@ In this process we are aiming to learn underlying algorithms, techniques and man
 
 Execute `make deploy` to deploy server in local kind cluster.
 Execute `make deploy FAST=true` to deploy server in local kind cluster without building Docker image.
+Execute `kubectl exec -it ubuntu-debug-pod --namespace walrs -- /bin/bash` to connect to debug pod.
+Execute below commands inside debug pod to check if dig command is working or not.
+
+```
+apt-get update
+apt-get install dnsutils
+dig +short +search walrs-headless-service.walrs.svc.cluster.local
+```
 
 ## Unit testing
 
