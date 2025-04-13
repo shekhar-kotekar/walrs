@@ -90,26 +90,27 @@ impl Node {
                     match recv_result {
                         Ok((bytes_read, peer_address)) => {
                             let command: NodeCommand = bincode::deserialize(&buffer[..bytes_read]).unwrap();
+                            let peer_ip = peer_address.ip().to_string();
                             match command {
                                 NodeCommand::RequetForVote { candidate_id, term } => {
-                                    tracing::info!("received vote request from {}", candidate_id);
+                                    tracing::info!("received vote request from {}", peer_ip);
                                     if term > self.term {
                                         self.term = term;
                                         self.state = NodeState::Follower;
                                     }
                                     let vote_result = if self.state != NodeState::Leader && leader_node.is_none() {
-                                        tracing::info!("accepted {} as leader.", candidate_id);
+                                        tracing::info!("accepted {} as leader.", peer_ip);
 
                                         leader_node = Some(Node {
                                             id:candidate_id,
-                                            address:peer_address.ip().to_string(),
+                                            address:peer_ip,
                                             state:NodeState::Leader,
                                             term,
                                             num_total_partitions: 0,
                                         });
                                         VoteResult::Accepted
                                     } else {
-                                        tracing::info!("rejected {} as leader.", candidate_id);
+                                        tracing::info!("rejected {} as leader.", peer_ip);
                                         VoteResult::Rejected
                                     };
                                     let response = NodeCommand::VoteResponse {
@@ -127,12 +128,12 @@ impl Node {
                                             nomination_accepted_count += 1;
                                         }
                                         if nomination_accepted_count >= min_votes_needed {
-                                            tracing::info!("Node {} won the election", self.id);
+                                            tracing::info!("This node {} won the election", self.address);
                                             total_votes_received = 0;
                                             nomination_accepted_count = 0;
                                             self.state = NodeState::Leader;
                                         } else if total_votes_received >= num_peers {
-                                            tracing::info!("Node {} lost the election", self.id);
+                                            tracing::info!("This node {} lost the election", self.address);
                                             total_votes_received = 0;
                                             nomination_accepted_count = 0;
                                             self.state = NodeState::Follower;
