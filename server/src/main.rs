@@ -166,7 +166,7 @@ fn get_cluster_info(pod_ip: &str, sleep_duration_seconds: Duration) -> Vec<Node>
 }
 
 fn dig_cluster_nodes(service_name: &str, pod_ip: &str) -> Vec<String> {
-    tracing::info!("Running dig command for {} service.", service_name);
+    tracing::debug!("Running dig command for {} service.", service_name);
     let output = Command::new("dig")
         .args(["+short", "+search", service_name])
         .output()
