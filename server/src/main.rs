@@ -25,7 +25,7 @@ const SLEEP_TIME_IN_SECONDS: u64 = 5;
 const K8S_SERVICE_NAME: &str = "walrs-headless-service.walrs.svc.cluster.local";
 const MPSC_MAX_Q_SIZE: usize = 100;
 const MIN_HEARTBEAT_INTERVAL_MS: u64 = 1000;
-const MAX_HEARTBEAT_INTERVAL_MS: u64 = 15000;
+const MAX_HEARTBEAT_INTERVAL_MS: u64 = 20000;
 
 // Main will be responsible for external facing communication like producer or consumer requests.
 // Internal communication will be handled by Node and partition managers.

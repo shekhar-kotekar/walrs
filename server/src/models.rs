@@ -17,9 +17,7 @@ pub enum VoteRejectionReason {
         leader_address: String,
         leader_heartbeat_interval: u64,
     },
-    LowerTerm {
-        term: u64,
-    },
+    LowerTerm,
 }
 
 pub enum MainCommands {

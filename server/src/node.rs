@@ -78,9 +78,6 @@ impl Node {
         let mut heartbeat_interval = interval(Duration::from_millis(self.sleep_interval));
         let node_socket = UdpSocket::bind(&self.address).await.unwrap();
 
-        // let mut total_votes_received = 0;
-        // let mut nomination_accepted_count = 0;
-        // let mut max_candidate_attempts = 10;
         let mut leader_node: Option<Node> = None;
         let mut topics: HashMap<String, Topic> = HashMap::new();
         let mut last_heartbeat_from_leader = tokio::time::Instant::now();
@@ -127,8 +124,8 @@ impl Node {
                                                     tracing::info!("Cluster already has a leader: {}", leader_address);
                                                     leader_node = Some(Node::new_leader(leader_address, leader_heartbeat_interval));
                                                 }
-                                                _ => {
-                                                    tracing::info!("Vote rejected from {}. Reason: {:?}", voter_address, reason);
+                                                VoteRejectionReason::LowerTerm => {
+                                                    self.term = self.term + 1;
                                                 }
                                             }
                                         }
@@ -205,12 +202,13 @@ impl Node {
                             }
                         }
                         NodeState::Candidate => {
+                            tracing::info!("I am still a candidate. Address: {}, term: {}", self.address, self.term);
                             if self.nomination_accepted_count >= min_votes_needed {
-                                tracing::info!("I am a leader now. Address: {}", self.address);
                                 self.state = NodeState::Leader;
+                                tracing::info!("I am a leader now. Address: {}", self.address);
                                 leader_node = Some(Node::new_leader(self.address.clone(), self.sleep_interval));
                             } else {
-                                tracing::info!("I am still a candidate. Address: {}", self.address);
+
                                 if self.max_candidate_attempts == 0 {
                                     tracing::warn!("I {} did not receive votes. Becoming follower.", self.address);
                                     self.state = NodeState::Follower;
@@ -267,7 +265,7 @@ impl Node {
                 },
             }
         } else {
-            if candidate_term > self.term {
+            if candidate_term >= self.term {
                 VoteResult::Accepted
             } else {
                 tracing::info!(
@@ -277,9 +275,7 @@ impl Node {
                     self.term
                 );
                 VoteResult::Rejected {
-                    reason: VoteRejectionReason::LowerTerm {
-                        term: candidate_term,
-                    },
+                    reason: VoteRejectionReason::LowerTerm,
                 }
             }
         }
@@ -506,7 +502,7 @@ mod should {
         let reject_leader_command = NodeCommand::VoteResponse {
             voter_address: "0.0.0.0:5060".to_string(),
             vote_result: VoteResult::Rejected {
-                reason: VoteRejectionReason::LowerTerm { term: 1 },
+                reason: VoteRejectionReason::LowerTerm,
             },
         };
         let reject_leader_message = bincode::serialize(&reject_leader_command).unwrap();
@@ -532,7 +528,7 @@ mod should {
         let reject_leader_command = NodeCommand::VoteResponse {
             voter_address: "0.0.0.0:5061".to_string(),
             vote_result: VoteResult::Rejected {
-                reason: VoteRejectionReason::LowerTerm { term: 1 },
+                reason: VoteRejectionReason::LowerTerm,
             },
         };
         let reject_leader_message = bincode::serialize(&reject_leader_command).unwrap();
@@ -557,13 +553,6 @@ mod should {
     #[traced_test]
     async fn send_heartbeat_signal_to_peers() {
         let sleep_interval: u64 = 20;
-        // let mut test_node = Node {
-        //     address: "0.0.0.0:5065".to_string(),
-        //     state: NodeState::Leader,
-        //     term: 1,
-        //     num_total_partitions: 0,
-        //     sleep_interval: sleep_interval,
-        // };
         let mut leader_node = Node::new_leader("0.0.0.0:5065".to_string(), sleep_interval);
         let (_, rx) = mpsc::channel(1);
         let cancellation_token = CancellationToken::new();
