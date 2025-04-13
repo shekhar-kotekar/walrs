@@ -55,6 +55,7 @@ pub enum NodeState {
 pub enum NodeCommand {
     RequetForVote {
         candidate_address: String,
+        heartbeat_interval: u64,
         term: u64,
     },
     VoteResponse {
@@ -63,7 +64,6 @@ pub enum NodeCommand {
     },
     Heartbeat {
         leader_address: String,
-        term: u64,
     },
     AddPeer {
         peer: Node,
