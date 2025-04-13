@@ -33,7 +33,6 @@ build_image:
 	# --progress=plain
 	docker build --tag ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT} -f ./server/Dockerfile .
 	@echo "INFO: docker image built successfully!"
-	docker images
 
 push_image: set_kind_context build_image
 	docker push ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT}

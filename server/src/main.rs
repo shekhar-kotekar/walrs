@@ -4,7 +4,6 @@ use common::{
 };
 use models::MainCommands;
 use node::Node;
-use rand::{thread_rng, Rng};
 use std::{process::Command, thread, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -24,7 +23,6 @@ const MAX_RETRIES: u8 = 30;
 const SLEEP_TIME_IN_SECONDS: u64 = 5;
 const K8S_SERVICE_NAME: &str = "walrs-headless-service.walrs.svc.cluster.local";
 const MPSC_MAX_Q_SIZE: usize = 100;
-const HEARTBEAT_MAX_INTERVAL_MS: u64 = 10000;
 
 // Main will be responsible for external facing communication like producer or consumer requests.
 // Internal communication will be handled by Node and partition managers.
@@ -41,13 +39,13 @@ async fn main() {
 
     //TODO: How to get the list of peers from the cluster periodically?
     let peers = get_cluster_info(&pod_ip, Duration::from_secs(SLEEP_TIME_IN_SECONDS));
-    let interval_ms = thread_rng().gen_range(100..HEARTBEAT_MAX_INTERVAL_MS);
+
     let (_, main_rx) = mpsc::channel::<MainCommands>(MPSC_MAX_Q_SIZE);
 
     let node_cancellation_token = cancellation_token.child_token();
     task_tracker.spawn(async move {
         local_node
-            .run(interval_ms, peers, main_rx, node_cancellation_token)
+            .run(peers, main_rx, node_cancellation_token)
             .await;
     });
 

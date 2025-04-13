@@ -53,11 +53,24 @@ pub enum NodeState {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum NodeCommand {
-    RequetForVote { candidate_id: Uuid, term: u64 },
-    VoteResponse { voter_id: Uuid, vote: VoteResult },
-    Heartbeat { leader_id: Uuid, term: u64 },
-    AddPeer { peer: Node },
-    RemovePeer { peer_id: Uuid },
+    RequetForVote {
+        candidate_address: String,
+        term: u64,
+    },
+    VoteResponse {
+        voter_address: String,
+        vote: VoteResult,
+    },
+    Heartbeat {
+        leader_address: String,
+        term: u64,
+    },
+    AddPeer {
+        peer: Node,
+    },
+    RemovePeer {
+        peer_address: String,
+    },
 }
 
 #[derive(Debug, PartialEq)]
