@@ -22,7 +22,7 @@ const NODE_MANAGER_PORT: u16 = 5056;
 const WALRS_PORT: u16 = 5055;
 const MAX_RETRIES: u8 = 30;
 const SLEEP_TIME_IN_SECONDS: u64 = 5;
-const K8S_SERVICE_NAME: &str = "walrs-srvr-service";
+const K8S_SERVICE_NAME: &str = "walrs-headless-service.walrs.svc.cluster.local";
 const MPSC_MAX_Q_SIZE: usize = 100;
 const HEARTBEAT_MAX_INTERVAL_MS: u64 = 10000;
 
@@ -55,6 +55,8 @@ async fn main() {
         .await
         .unwrap();
 
+    tracing::debug!("Listening on: {}", main_tcp_listener.local_addr().unwrap());
+
     tokio::select! {
         _ = async {
             loop {
@@ -80,6 +82,10 @@ async fn main() {
 async fn process_external_request(socket: TcpStream) {
     let (reader, writer) = socket.into_split();
     let mut buffer = [0u8; 48];
+    tracing::debug!(
+        "Processing external request from: {}",
+        reader.peer_addr().unwrap()
+    );
     match reader.try_read(&mut buffer) {
         Ok(0) => {
             tracing::info!("Connection closed for: {}", reader.peer_addr().unwrap());
@@ -160,6 +166,7 @@ fn get_cluster_info(pod_ip: &str, sleep_duration_seconds: Duration) -> Vec<Node>
 }
 
 fn dig_cluster_nodes(service_name: &str, pod_ip: &str) -> Vec<String> {
+    tracing::info!("Running dig command for {} service.", service_name);
     let output = Command::new("dig")
         .args(["+short", "+search", service_name])
         .output()
