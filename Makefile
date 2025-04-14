@@ -44,10 +44,10 @@ replace_environment_variables:
 	@mkdir -p ./server/k8s/${GIT_COMMIT}
 
 	@sed -e 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' \
-		 -e 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' < ./server/k8s/prerequisites.yml > ./server/k8s/${GIT_COMMIT}/prerequisites.yml
+		 -e 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' < ./server/k8s/prerequisites.yml > ./server/k8s/temp/${GIT_COMMIT}/prerequisites.yml
 
 	@sed -e 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' \
-		 -e 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' < ./server/k8s/server.yml > ./server/k8s/${GIT_COMMIT}/server.yml
+		 -e 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' < ./server/k8s/server.yml > ./server/k8s/temp/${GIT_COMMIT}/server.yml
 
 	@echo "INFO: Environment variables replaced successfully!"
 
@@ -59,8 +59,8 @@ deploy:
         $(MAKE) push_image replace_environment_variables; \
     fi
 	@echo "INFO: Deploying to ${k8s_context} k8s cluster\n"
-	kubectl apply -f ./server/k8s/${GIT_COMMIT}/prerequisites.yml
-	kubectl apply -f ./server/k8s/${GIT_COMMIT}/server.yml
+	kubectl apply -f ./server/k8s/temp/${GIT_COMMIT}/prerequisites.yml
+	kubectl apply -f ./server/k8s/temp/${GIT_COMMIT}/server.yml
 
 	@echo "INFO: Deployed successfully!\n"
 	kubectl get pods --namespace=${PROJECT_NAME}
@@ -72,10 +72,10 @@ redeploy: replace_environment_variables
 
 teardown: set_kind_context
 	@echo "INFO: Deleting deployment"
-	kubectl delete -f ./server/k8s/${GIT_COMMIT}/server.yml
-	kubectl delete -f ./server/k8s/${GIT_COMMIT}/prerequisites.yml
+	kubectl delete -f ./server/k8s/temp/${GIT_COMMIT}/server.yml
+	kubectl delete -f ./server/k8s/temp/${GIT_COMMIT}/prerequisites.yml
 
-	rm -rf ./server/k8s/${GIT_COMMIT}/
+	rm -rf ./server/k8s/temp/${GIT_COMMIT}/
 
 	@echo "INFO: Deleted successfully!"
 	kubectl get namespaces

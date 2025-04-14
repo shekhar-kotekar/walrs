@@ -86,7 +86,7 @@ impl Node {
         tracing::debug!("Minimum votes needed to be a leader: {}", min_votes_needed);
 
         loop {
-            let mut buffer = [0u8; 60];
+            let mut buffer = [0u8; 150];
             tokio::select! {
                 received_data = node_socket.recv_from(&mut buffer) => {
                     match received_data {
@@ -94,19 +94,54 @@ impl Node {
                             let command: NodeCommand = bincode::deserialize(&buffer[..bytes_read]).unwrap();
                             match command {
                                 NodeCommand::RequetForVote { candidate_address, heartbeat_interval, term } => {
-                                    let cluster_has_leader: bool = leader_node.is_some();
-                                    tracing::info!("leader node details: {:?}", leader_node);
-                                    let vote_result: VoteResult = self.handle_request_for_vote(&candidate_address, term, cluster_has_leader).await;
-                                    if vote_result == VoteResult::Accepted {
+                                    tracing::info!(
+                                        "received vote request. candidate address: {}, term: {}",
+                                        candidate_address,
+                                        term
+                                    );
+                                    let vote_result: VoteResult = if self.state == NodeState::Leader {
+                                        tracing::info!(
+                                            "I am already a leader. Rejecting vote request from {}",
+                                            candidate_address
+                                        );
+                                        VoteResult::Rejected {
+                                            reason: VoteRejectionReason::LeaderAlreadyExists {
+                                                leader_address: self.address.clone(),
+                                                leader_heartbeat_interval: self.sleep_interval,
+                                            },
+                                        }
+                                    } else if let Some(leader) = leader_node.as_ref() {
+                                        tracing::info!("Cluster already has a leader. Rejecting vote request.");
+                                        VoteResult::Rejected {
+                                            reason: VoteRejectionReason::LeaderAlreadyExists {
+                                                leader_address: leader.address.clone(),
+                                                leader_heartbeat_interval: leader.sleep_interval,
+                                            },
+                                        }
+                                    } else {
+                                        if term >= self.term {
                                             tracing::info!("** NEW LEADER ACCEPTED **: {} is a new leader with the term: {}", candidate_address, term);
                                             leader_node = Some(Node::new_leader(candidate_address.clone(), heartbeat_interval));
                                             self.state = NodeState::Follower;
-                                    }
-                                    let node_response = NodeCommand::VoteResponse {
+                                            VoteResult::Accepted
+                                        } else {
+                                            tracing::info!(
+                                                "Candidate {} has a lower term {} than my term {}. Rejecting its vote request.",
+                                                candidate_address,
+                                                term,
+                                                self.term
+                                            );
+                                            VoteResult::Rejected {
+                                                reason: VoteRejectionReason::LowerTerm,
+                                            }
+                                        }
+                                    };
+
+                                    let voter_response = NodeCommand::VoteResponse {
                                         voter_address: self.address.clone(),
                                         vote_result,
                                     };
-                                    let serialized_vote_result = bincode::serialize(&node_response).unwrap();
+                                    let serialized_vote_result = bincode::serialize(&voter_response).unwrap();
                                     let _ = node_socket
                                         .send_to(&serialized_vote_result, peer_address)
                                         .await;
@@ -230,53 +265,6 @@ impl Node {
                 _ = cancellation_token.cancelled() => {
                     tracing::info!("Node {} shutting down", self.address);
                     break;
-                }
-            }
-        }
-    }
-
-    async fn handle_request_for_vote(
-        &self,
-        candidate_address: &str,
-        candidate_term: u64,
-        cluster_has_leader: bool,
-    ) -> VoteResult {
-        tracing::info!(
-            "received vote request. candidate address: {}, term: {}",
-            candidate_address,
-            candidate_term
-        );
-        if self.state == NodeState::Leader {
-            tracing::info!(
-                "I am already a leader. Rejecting vote request from {}",
-                candidate_address
-            );
-            VoteResult::Rejected {
-                reason: VoteRejectionReason::LeaderAlreadyExists {
-                    leader_address: self.address.clone(),
-                    leader_heartbeat_interval: self.sleep_interval,
-                },
-            }
-        } else if cluster_has_leader {
-            tracing::info!("Cluster already has a leader. Rejecting vote request.");
-            VoteResult::Rejected {
-                reason: VoteRejectionReason::LeaderAlreadyExists {
-                    leader_address: self.address.clone(),
-                    leader_heartbeat_interval: self.sleep_interval,
-                },
-            }
-        } else {
-            if candidate_term >= self.term {
-                VoteResult::Accepted
-            } else {
-                tracing::info!(
-                    "Candidate {} has a lower term {} than my term {}. Rejecting its vote request.",
-                    candidate_address,
-                    candidate_term,
-                    self.term
-                );
-                VoteResult::Rejected {
-                    reason: VoteRejectionReason::LowerTerm,
                 }
             }
         }

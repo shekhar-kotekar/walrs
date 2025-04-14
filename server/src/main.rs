@@ -2,25 +2,24 @@ use common::{
     enable_tracing,
     models::{BrokerResponse, ClientCommand},
 };
-use models::MainCommands;
-use node::Node;
+use models::{MainCommands, NodeResponse};
+use partition::Partition;
 use rand::{thread_rng, Rng};
-use std::{process::Command, thread, time::Duration};
+use std::{process::Command, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
     signal,
-    sync::mpsc,
+    sync::{mpsc, oneshot},
 };
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 mod models;
-mod node;
+mod partition;
 mod partitions;
 
 // TODO: Read all the constants from a config file
 const NODE_MANAGER_PORT: u16 = 5056;
 const WALRS_PORT: u16 = 5055;
-const MAX_RETRIES: u8 = 30;
 const SLEEP_TIME_IN_SECONDS: u64 = 5;
 const K8S_SERVICE_NAME: &str = "walrs-headless-service.walrs.svc.cluster.local";
 const MPSC_MAX_Q_SIZE: usize = 100;
@@ -39,21 +38,34 @@ async fn main() {
     let sleep_interval: u64 =
         thread_rng().gen_range(MIN_HEARTBEAT_INTERVAL_MS..MAX_HEARTBEAT_INTERVAL_MS);
     let node_address = format!("{}:{}", pod_ip, NODE_MANAGER_PORT);
-    let mut local_node = Node::new(node_address, sleep_interval);
+
     let task_tracker = TaskTracker::new();
     let cancellation_token = CancellationToken::new();
 
-    //TODO: How to get the list of peers from the cluster periodically?
-    let peers = get_cluster_info(&pod_ip, Duration::from_secs(SLEEP_TIME_IN_SECONDS));
+    let (main_tx, main_rx) = mpsc::channel::<MainCommands>(MPSC_MAX_Q_SIZE);
 
-    let (_, main_rx) = mpsc::channel::<MainCommands>(MPSC_MAX_Q_SIZE);
-
+    let local_node = Partition::new_follower(node_address);
     let node_cancellation_token = cancellation_token.child_token();
     task_tracker.spawn(async move {
         local_node
-            .run(peers, main_rx, node_cancellation_token)
+            .run(main_rx, sleep_interval, node_cancellation_token)
             .await;
     });
+
+    let search_nodes_cancellation_token = cancellation_token.child_token();
+    let pod_ip_clone = pod_ip.clone();
+    task_tracker.spawn(async move {
+        search_nodes_in_cluster(
+            K8S_SERVICE_NAME,
+            main_tx,
+            search_nodes_cancellation_token,
+            &pod_ip_clone,
+        )
+        .await;
+    });
+
+    //TODO: How to get the list of peers from the cluster periodically?
+    // let peers = get_cluster_info(&pod_ip, Duration::from_secs(SLEEP_TIME_IN_SECONDS));
 
     let main_tcp_listener = TcpListener::bind(format!("{}:{}", pod_ip, WALRS_PORT))
         .await
@@ -138,33 +150,70 @@ async fn process_external_request(socket: TcpStream) {
     }
 }
 
-fn get_cluster_info(pod_ip: &str, sleep_duration_seconds: Duration) -> Vec<Node> {
-    let mut try_count = 0;
+// fn get_cluster_info(pod_ip: &str, sleep_duration_seconds: Duration) -> Vec<Node> {
+//     let mut try_count = 0;
+//     loop {
+//         let nodes: Vec<String> = dig_cluster_nodes(K8S_SERVICE_NAME, pod_ip);
+//         if nodes.is_empty() {
+//             try_count += 1;
+//             if try_count >= MAX_RETRIES {
+//                 panic!(
+//                     "No nodes found in the cluster after {} tries. Exiting...",
+//                     MAX_RETRIES
+//                 );
+//             }
+//             tracing::warn!(
+//                 "No nodes found in the cluster. Will retry after {} seconds.",
+//                 SLEEP_TIME_IN_SECONDS
+//             );
+//             thread::sleep(sleep_duration_seconds);
+//         } else {
+//             tracing::info!("Found {} nodes in the cluster.", nodes.len());
+//             return nodes
+//                 .iter()
+//                 .map(|peer_ip_address| {
+//                     let peer_address = format!("{}:{}", peer_ip_address, NODE_MANAGER_PORT);
+//                     tracing::info!("peer address: {}", peer_address);
+//                     Node::new_follower(peer_address, 0)
+//                 })
+//                 .collect::<Vec<Node>>();
+//         }
+//     }
+// }
+
+async fn search_nodes_in_cluster(
+    service_name: &str,
+    main_tx: mpsc::Sender<MainCommands>,
+    cancellation_token: CancellationToken,
+    pod_ip: &str,
+) {
+    let mut interval = tokio::time::interval(Duration::from_secs(SLEEP_TIME_IN_SECONDS));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
-        let nodes: Vec<String> = dig_cluster_nodes(K8S_SERVICE_NAME, pod_ip);
-        if nodes.is_empty() {
-            try_count += 1;
-            if try_count >= MAX_RETRIES {
-                panic!(
-                    "No nodes found in the cluster after {} tries. Exiting...",
-                    MAX_RETRIES
-                );
+        tokio::select! {
+            _ = interval.tick() => {
+                let peers_in_cluster = dig_cluster_nodes(service_name, pod_ip);
+                for peer in peers_in_cluster {
+                    let peer_address = format!("{}:{}", peer, NODE_MANAGER_PORT);
+                    let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeResponse>();
+                    main_tx.send(MainCommands::AddPeer {
+                        peer_address,
+                        tx:oneshot_tx,
+                    }).await.unwrap();
+                    match oneshot_rx.await {
+                        Ok(NodeResponse::PeerAdded) => {
+                            tracing::info!("Peer added successfully.");
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to add peer.: {:?}", e);
+                        }
+                    }
+                }
             }
-            tracing::warn!(
-                "No nodes found in the cluster. Will retry after {} seconds.",
-                SLEEP_TIME_IN_SECONDS
-            );
-            thread::sleep(sleep_duration_seconds);
-        } else {
-            tracing::info!("Found {} nodes in the cluster.", nodes.len());
-            return nodes
-                .iter()
-                .map(|peer_ip_address| {
-                    let peer_address = format!("{}:{}", peer_ip_address, NODE_MANAGER_PORT);
-                    tracing::info!("peer address: {}", peer_address);
-                    Node::new(peer_address, 0)
-                })
-                .collect::<Vec<Node>>();
+            _ = cancellation_token.cancelled() => {
+                tracing::debug!("Cancelling search_nodes_in_cluster task.");
+                break;
+            }
         }
     }
 }
