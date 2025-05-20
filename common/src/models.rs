@@ -2,6 +2,8 @@ use std::{io::Read, net::TcpStream};
 
 use serde::{Deserialize, Serialize};
 
+use crate::consumer::ConsumerResponse;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Message {
     pub payload: Vec<u8>,
@@ -39,7 +41,7 @@ pub enum ClientCommand {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ClientType {
     Producer,
-    Consumer,
+    Consumer { topic_name: String },
     Admin,
 }
 
@@ -52,6 +54,7 @@ pub enum ClusterResponse {
     ConnectionAccepted,
     ConnectionRejected { reason: String },
     MessagesPersisted { count: u8 },
+    ConsumerResponse(ConsumerResponse),
 }
 
 impl ClusterResponse {

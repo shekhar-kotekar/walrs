@@ -1,15 +1,27 @@
 use common::models::{ClusterResponse, Message};
 use tokio::sync::{mpsc, oneshot};
 
-#[derive(Debug, Clone)]
-pub enum PartitionResponse {
+#[derive(Debug)]
+pub enum PartitionWriterResponse {
     MessagesPersisted { count: u8 },
+    InternalError { message: String },
 }
 
+#[derive(Debug)]
+pub enum PartitionReaderResponse {
+    MessagesRead { messages: Vec<Message> },
+    InternalError { message: String },
+}
+
+#[derive(Debug)]
 pub enum PartitionCommand {
     WriteMessages {
         messages: Vec<Message>,
-        tx: oneshot::Sender<PartitionResponse>,
+        tx: oneshot::Sender<PartitionWriterResponse>,
+    },
+    ReadMessages {
+        topic_name: String,
+        tx: oneshot::Sender<PartitionReaderResponse>,
     },
 }
 
@@ -20,7 +32,11 @@ pub enum BrokerCommand {
         retention_period_hours: u16,
         broker_tx: oneshot::Sender<BrokerResponse>,
     },
-    GetPartitionManager {
+    GetPartitionWriter {
+        topic_name: String,
+        broker_tx: oneshot::Sender<BrokerResponse>,
+    },
+    GetPartitionReader {
         topic_name: String,
         broker_tx: oneshot::Sender<BrokerResponse>,
     },
