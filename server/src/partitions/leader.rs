@@ -1,274 +1,220 @@
-use common::models::{AckLevel, MessageBatch};
-use serde::{Deserialize, Serialize};
-use tokio::{
-    net::UdpSocket,
-    sync::{mpsc, oneshot},
-};
-use tokio_util::sync::CancellationToken;
+// use common::models::AckLevel;
+// use tokio::sync::mpsc;
+// use tokio_util::sync::CancellationToken;
 
-use crate::partitions::{
-    replica::ReplicaRequest,
-    segment_writer::{SegmentWriter, SegmentWriterCommand},
-};
+// pub struct Leader {
+//     partition_num: u8,
+//     topic_name: String,
+//     follower_address: Vec<String>,
+//     ack_level: AckLevel,
+// }
 
-use super::segment_writer::SegmentWriterResponse;
+// trait PartitionTask {
+//     async fn start(
+//         &self,
+//         main_rx: mpsc::Receiver<PartitionCommand>,
+//         cancellation_token: CancellationToken,
+//     );
+// }
 
-const BUFFER_SIZE: usize = 256;
-const STORAGE_DEFAULT_PATH: &str = "/tmp";
-const SEGMENT_WRITER_CHANNEL_SIZE: usize = 1024;
+// impl Leader {
+//     async fn write_messages(&self, messages: Vec<Message>) -> PartitionResponse {
+//         tracing::info!("Leader received messages: {:?}", messages);
+//         match self.ack_level {
+//             AckLevel::None => {
+//                 tracing::info!("Leader ack level is set to None. Sending ack immediately.");
+//                 PartitionResponse::MessagesPersisted
+//             }
+//             AckLevel::Leader => {
+//                 tracing::info!(
+//                     "Leader ack level is set to Leader. Sending ack after leader has written messages to its WAL."
+//                 );
+//                 PartitionResponse::MessagesPersisted
+//             }
+//             AckLevel::All => {
+//                 tracing::info!(
+//                     "Leader ack level is set to All. Sending ack after all the followers have written messages to its WAL."
+//                 );
+//                 PartitionResponse::MessagesPersisted
+//             }
+//         }
+//     }
+// }
 
-pub enum PartitionCommand {
-    Write {
-        batch: MessageBatch,
-        response_tx: oneshot::Sender<PartitionResponse>,
-    },
-}
+// impl PartitionTask for Leader {
+//     async fn start(
+//         &self,
+//         mut main_rx: mpsc::Receiver<PartitionCommand>,
+//         cancellation_token: CancellationToken,
+//     ) {
+//         tracing::info!(
+//             "Starting leader for partition {} of topic {}",
+//             self.partition_num,
+//             self.topic_name
+//         );
+//         loop {
+//             tokio::select! {
+//                 Some(partition_command) = main_rx.recv() => {
+//                     match partition_command {
+//                         PartitionCommand::WriteMessages {messages, tx} => {
+//                             let response = self.write_messages(messages).await;
+//                             let _ = tx.send(response);
+//                         }
+//                     }
+//                 }
+//                 _ = cancellation_token.cancelled() => {
+//                     tracing::info!("Leader task of topic {} for {} partition cancelled.", self.topic_name, self.partition_num);
+//                     break;
+//                 }
+//             }
+//         }
+//     }
+// }
 
-#[derive(Debug, PartialEq)]
-pub enum PartitionResponse {
-    LeaderAcknowledged,
-    MajorityAcknowledged,
-    AllAcknowledged,
-    Error { message: String },
-}
+// #[cfg(test)]
+// mod should {
+//     use super::*;
+//     use crate::models::Message;
+//     use tokio::sync::oneshot;
+//     use tracing_test::traced_test;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum LeaderResponse {
-    FetchResponse {
-        messages: MessageBatch,
-        has_more: bool,
-    },
-}
+//     #[test]
+//     fn test_create_leader_object() {
+//         let dummy_leader = Leader {
+//             partition_num: 0,
+//             topic_name: "test_topic".to_string(),
+//             follower_address: vec!["follower_1".to_string(), "follower_2".to_string()],
+//             ack_level: AckLevel::None,
+//         };
+//         assert!(dummy_leader.partition_num == 0);
+//         assert!(dummy_leader.topic_name == "test_topic");
+//         assert!(dummy_leader.follower_address.len() == 2);
+//         assert!(dummy_leader.follower_address[0] == "follower_1");
+//         assert!(dummy_leader.follower_address[1] == "follower_2");
+//     }
 
-pub struct Leader {
-    pub num_partition: u8,
-    pub topic_name: String,
-    pub address: String,
-    in_sync_replicas: Vec<String>,
-    high_watermark: u64,
-    storage_path: String,
-}
+//     #[tokio::test]
+//     #[traced_test]
+//     async fn test_leader_should_immediately_send_ack_when_ack_level_set_to_none() {
+//         let (tx, rx) = mpsc::channel::<PartitionCommand>(1);
+//         let dummy_leader = Leader {
+//             partition_num: 0,
+//             topic_name: "test_topic".to_string(),
+//             follower_address: vec!["follower_1".to_string(), "follower_2".to_string()],
+//             ack_level: AckLevel::None,
+//         };
+//         let cancellation_token = CancellationToken::new();
+//         tokio::spawn(async move {
+//             dummy_leader.start(rx, cancellation_token).await;
+//         });
 
-impl Leader {
-    pub fn new(
-        num_partition: u8,
-        topic_name: String,
-        address: String,
-        storage_path: Option<String>,
-    ) -> Self {
-        let storage_base_path = storage_path.unwrap_or_else(|| {
-            tracing::warn!("Storage path is not provided. Using default path.");
-            STORAGE_DEFAULT_PATH.to_string()
-        });
-        let storage_path = format!(
-            "{}/topic_{}/partition_{}",
-            storage_base_path, topic_name, num_partition
-        );
-        Leader {
-            num_partition,
-            topic_name,
-            address,
-            in_sync_replicas: vec![],
-            high_watermark: 0,
-            storage_path,
-        }
-    }
+//         let message: Message = Message::new(
+//             b"msg_key".to_vec(),
+//             b"msg_value".to_vec(),
+//             vec![("header1".to_string(), "value1".to_string())]
+//                 .into_iter()
+//                 .collect(),
+//         );
+//         tracing::info!("Sending message: {:?}", message);
+//         let (message_tx, message_rx) = oneshot::channel::<PartitionResponse>();
+//         let partition_command: PartitionCommand = PartitionCommand::WriteMessages {
+//             messages: vec![message],
+//             tx: message_tx,
+//         };
+//         let _ = tx.send(partition_command).await;
+//         tracing::info!("Waiting for response");
+//         match message_rx.await {
+//             Ok(response) => {
+//                 tracing::info!("Received response: {:?}", response);
+//                 assert!(matches!(response, PartitionResponse::MessagesPersisted));
+//             }
+//             Err(e) => {
+//                 panic!("Failed to receive response: {:?}", e);
+//             }
+//         }
+//     }
 
-    async fn start_segment_writer(
-        &self,
-        segment_id: u32,
-        cancellation_token: CancellationToken,
-    ) -> mpsc::Sender<SegmentWriterCommand> {
-        let (segment_writer_tx, segment_writer_rx) =
-            mpsc::channel::<SegmentWriterCommand>(SEGMENT_WRITER_CHANNEL_SIZE);
+//     #[tokio::test]
+//     #[traced_test]
+//     async fn test_when_ack_level_set_to_leader_then_it_should_send_ack_after_leader_has_written_message(
+//     ) {
+//         let dummy_leader = Leader {
+//             partition_num: 0,
+//             topic_name: "test_topic".to_string(),
+//             follower_address: vec!["follower_1".to_string(), "follower_2".to_string()],
+//             ack_level: AckLevel::Leader,
+//         };
+//         let (tx, rx) = mpsc::channel::<PartitionCommand>(1);
+//         let cancellation_token = CancellationToken::new();
+//         tokio::spawn(async move {
+//             dummy_leader.start(rx, cancellation_token).await;
+//         });
 
-        let segment_writer: SegmentWriter =
-            SegmentWriter::new(self.storage_path.clone(), segment_id);
-        tokio::spawn(async move {
-            segment_writer
-                .start(segment_writer_rx, cancellation_token)
-                .await;
-        });
-        segment_writer_tx
-    }
+//         let message: Message = Message::new(
+//             b"msg_key".to_vec(),
+//             b"msg_value".to_vec(),
+//             vec![("header1".to_string(), "value1".to_string())]
+//                 .into_iter()
+//                 .collect(),
+//         );
+//         tracing::info!("Sending message: {:?}", message);
+//         let (message_tx, message_rx) = oneshot::channel::<PartitionResponse>();
+//         let partition_command: PartitionCommand = PartitionCommand::WriteMessages {
+//             messages: vec![message],
+//             tx: message_tx,
+//         };
+//         let _ = tx.send(partition_command).await;
+//         tracing::info!("Waiting for response");
+//         match message_rx.await {
+//             Ok(response) => {
+//                 tracing::info!("Received response: {:?}", response);
+//                 assert!(matches!(response, PartitionResponse::MessagesPersisted));
+//             }
+//             Err(e) => {
+//                 panic!("Failed to receive response: {:?}", e);
+//             }
+//         }
+//     }
 
-    pub async fn start(
-        &self,
-        mut main_rx: mpsc::Receiver<PartitionCommand>,
-        cancellation_token: CancellationToken,
-    ) {
-        let current_segment_id: u32 = 0;
-        //TODO: Add code to change the file to which we write data after reaching a certain size or time.
-        let segment_writer_tx: mpsc::Sender<SegmentWriterCommand> = self
-            .start_segment_writer(current_segment_id, cancellation_token.child_token())
-            .await;
+//     #[tokio::test]
+//     #[traced_test]
+//     async fn test_when_ack_level_set_to_none_leader_should_send_ack_after_leader_has_written_message(
+//     ) {
+//         let dummy_leader = Leader {
+//             partition_num: 0,
+//             topic_name: "test_topic".to_string(),
+//             follower_address: vec!["follower_1".to_string(), "follower_2".to_string()],
+//             ack_level: AckLevel::All,
+//         };
+//         let (tx, rx) = mpsc::channel::<PartitionCommand>(1);
+//         let cancellation_token = CancellationToken::new();
+//         tokio::spawn(async move {
+//             dummy_leader.start(rx, cancellation_token).await;
+//         });
 
-        tracing::info!(
-            "Partition leader for {} topic, partition {} started.",
-            self.topic_name,
-            self.num_partition
-        );
-        let leader_socket = UdpSocket::bind(&self.address).await.unwrap();
-        loop {
-            let mut buffer = [0u8; BUFFER_SIZE];
-            tokio::select! {
-                Some(command) = main_rx.recv() => {
-                    match command {
-                        PartitionCommand::Write { batch, response_tx } => {
-                            let segment_writer_tx_clone = segment_writer_tx.clone();
-                            tokio::spawn(async move {
-                                let batch_bytes = bincode::serialize(&batch).unwrap();
-                                let (segment_writer_response_tx, segment_writer_response_rx) = oneshot::channel::<SegmentWriterResponse>();
-                                let segment_writer_command = SegmentWriterCommand::Write {
-                                    data: batch_bytes,
-                                    response_tx: segment_writer_response_tx,
-                                };
-                                segment_writer_tx_clone.send(segment_writer_command).await.unwrap();
-                                let response_from_segment_writer = segment_writer_response_rx.await.unwrap();
-                                let response =  match response_from_segment_writer {
-                                    SegmentWriterResponse::WriteSuccess => PartitionResponse::LeaderAcknowledged,
-                                    SegmentWriterResponse::WriteFailure => PartitionResponse::Error {
-                                        message: "Error writing to segment file.".to_string(),
-                                    },
-                                };
-                                response_tx.send(response).unwrap();
-                            });
-                        }
-                    }
-                }
-                recv_result = leader_socket.recv_from(&mut buffer) => {
-                    match recv_result {
-                        Ok((size, peer)) => {
-                            tracing::info!("Received {} bytes from {}", size, peer);
-                            let replica_request: ReplicaRequest = bincode::deserialize(&buffer[..size]).unwrap();
-                            match replica_request {
-                                ReplicaRequest::FetchRequest { current_offset } => {
-                                    let message_batch = MessageBatch {
-                                        topic_name: self.topic_name.clone(),
-                                        messages: vec![],
-                                        ack_level: AckLevel::Leader,
-                                    };
-                                    let response = LeaderResponse::FetchResponse {
-                                        messages: message_batch,
-                                        has_more: false,
-                                    };
-                                    let response_bytes = bincode::serialize(&response).unwrap();
-                                    leader_socket.send_to(&response_bytes, &peer).await.unwrap();
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!("Error receiving data: {:?}", e);
-                        }
-                    }
-                }
-                _ = cancellation_token.cancelled() => {
-                    tracing::info!("Partition leader for {} topic cancelled.", self.topic_name);
-                    break;
-                }
-            }
-        }
-        tracing::info!(
-            "Partition leader for {} topic, partition {} stopped.",
-            self.topic_name,
-            self.num_partition
-        );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use common::models::{AckLevel, Message, MessageBatch};
-    use tokio::sync::{mpsc, oneshot};
-    use tokio_util::sync::CancellationToken;
-    use tracing_test::traced_test;
-
-    use super::*;
-
-    #[tokio::test]
-    #[traced_test]
-    async fn partition_leader_should_be_able_to_write_message_batches() {
-        let partition_leader =
-            Leader::new(0, "topic_1".to_string(), "0.0.0.0:1000".to_string(), None);
-
-        let cancellation_token = CancellationToken::new();
-        let (main_tx, main_rx) = mpsc::channel::<PartitionCommand>(1);
-        let partition_leader_ct = cancellation_token.child_token();
-        let leader_task_handle = tokio::spawn(async move {
-            partition_leader.start(main_rx, partition_leader_ct).await;
-        });
-
-        let messages = vec![
-            Message {
-                payload: "message_1_payload".as_bytes().to_vec(),
-            },
-            Message {
-                payload: "message_2_payload".as_bytes().to_vec(),
-            },
-        ];
-        let batch = MessageBatch {
-            topic_name: "topic1".to_string(),
-            messages,
-            ack_level: AckLevel::Leader,
-        };
-
-        let (oneshot_tx, oneshot_rx) = oneshot::channel::<PartitionResponse>();
-        main_tx
-            .send(PartitionCommand::Write {
-                batch,
-                response_tx: oneshot_tx,
-            })
-            .await
-            .unwrap();
-
-        let response = oneshot_rx.await.unwrap();
-        assert_eq!(response, PartitionResponse::LeaderAcknowledged);
-
-        cancellation_token.cancel();
-        leader_task_handle.await.unwrap();
-    }
-
-    #[ignore]
-    #[tokio::test]
-    #[traced_test]
-    async fn partition_leader_should_acknowledge_from_all_followers_when_ack_level_set_to_all() {
-        let partition_leader =
-            Leader::new(0, "topic_1".to_string(), "0.0.0.0:1001".to_string(), None);
-
-        let cancellation_token = CancellationToken::new();
-        let (main_tx, main_rx) = mpsc::channel::<PartitionCommand>(1);
-        let partition_leader_ct = cancellation_token.child_token();
-        let leader_task_handle = tokio::spawn(async move {
-            partition_leader.start(main_rx, partition_leader_ct).await;
-        });
-
-        let messages = vec![
-            Message {
-                payload: "message_1_payload".as_bytes().to_vec(),
-            },
-            Message {
-                payload: "message_2_payload".as_bytes().to_vec(),
-            },
-        ];
-        let batch = MessageBatch {
-            topic_name: "topic1".to_string(),
-            messages,
-            ack_level: AckLevel::All,
-        };
-
-        let (oneshot_tx, oneshot_rx) = oneshot::channel::<PartitionResponse>();
-        main_tx
-            .send(PartitionCommand::Write {
-                batch,
-                response_tx: oneshot_tx,
-            })
-            .await
-            .unwrap();
-
-        let response = oneshot_rx.await.unwrap();
-        assert_eq!(response, PartitionResponse::AllAcknowledged);
-
-        cancellation_token.cancel();
-        leader_task_handle.await.unwrap();
-    }
-}
+//         let message: Message = Message::new(
+//             b"msg_key".to_vec(),
+//             b"msg_value".to_vec(),
+//             vec![("header1".to_string(), "value1".to_string())]
+//                 .into_iter()
+//                 .collect(),
+//         );
+//         tracing::info!("Sending message: {:?}", message);
+//         let (message_tx, message_rx) = oneshot::channel::<PartitionResponse>();
+//         let partition_command: PartitionCommand = PartitionCommand::WriteMessages {
+//             messages: vec![message],
+//             tx: message_tx,
+//         };
+//         let _ = tx.send(partition_command).await;
+//         tracing::info!("Waiting for response");
+//         match message_rx.await {
+//             Ok(response) => {
+//                 tracing::info!("Received response: {:?}", response);
+//                 assert!(matches!(response, PartitionResponse::MessagesPersisted));
+//             }
+//             Err(e) => {
+//                 panic!("Failed to receive response: {:?}", e);
+//             }
+//         }
+//     }
+// }
