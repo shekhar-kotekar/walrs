@@ -1,10 +1,12 @@
 use common::{
     admin::ClusterAdmin,
+    consumer::Consumer,
     models::{ClientCommand, ClusterResponse, Message},
     producer::Producer,
 };
 
-fn main() {
+#[tokio::main]
+async fn main() {
     common::enable_tracing();
     let admin = ClusterAdmin {
         brokers: vec!["127.0.0.1:5056".into(), "broker2:9092".into()],
@@ -19,6 +21,12 @@ fn main() {
         ClusterResponse::TopicCreated { leader_address } => {
             tracing::info!("Topic created successfully. Leader address: {}", leader_address);
             send_messages(topic_name);
+            read_messages(topic_name, admin.brokers.clone()).await;
+        }
+        ClusterResponse::TopicAlreadyExists => {
+            tracing::info!("{} topic already exists.", topic_name);
+            send_messages(topic_name);
+            read_messages(topic_name, admin.brokers.clone()).await;
         }
         e => {
             tracing::error!("Failed to create topic because: {:?}", e);
@@ -45,6 +53,21 @@ fn send_messages(topic_name: &str) {
         }
         e => {
             tracing::error!("Failed to persist messages because: {:?}", e);
+        }
+    }
+}
+
+async fn read_messages(topic_name: &str, brokers: Vec<String>) {
+    let mut consumer = Consumer::new(topic_name.to_owned(), brokers);
+    match consumer.next_message().await {
+        Some(message_batch) => {
+            tracing::info!("Received message count: {:?}", message_batch.messages.len());
+            message_batch.messages.iter().for_each(|m| {
+                tracing::info!("Received message: {:?}", m);
+            });
+        }
+        None => {
+            tracing::error!("Failed to receive message batch.");
         }
     }
 }

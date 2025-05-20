@@ -3,6 +3,7 @@ use tracing_subscriber::fmt::format::FmtSpan;
 pub mod admin;
 mod authenticator;
 pub mod broker_response;
+pub mod consumer;
 pub mod message_batch;
 pub mod models;
 pub mod producer;

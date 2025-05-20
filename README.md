@@ -49,6 +49,19 @@ Example:
 cargo test node_manager -- --nocapture
 ```
 
+## Producers
+
+## Consumers
+
+When a consumer asks for next message batch, broker first performs following validations:
+
+1. consumer is authenticated and authorized to read from given topic
+2. topic exists on the broker
+
+Each broker in the cluster maintains a map of topic name and Tokio task MPSC sender. After validation broker checks if there is any existing Tokio reader task which can serve the request, broker will ask the topic to read next set of messages. If there is no such Tokio task then broker will spawn the new task and then send the request to this Tokio reader task.
+
+Tokio reader task will read next set of messages from the disk, send it to the broker and continue waiting for next request from the broker until it times out. During time out it will notify broker so that broker will remove this task from its internal map. Broker will simply relay these messages back to consumer.
+
 ## Next Milestones:
 
 - Milestone 1:

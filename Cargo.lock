@@ -328,6 +328,7 @@ dependencies = [
  "clap",
  "common",
  "serde",
+ "tokio",
  "toml",
  "tracing",
 ]

@@ -6,7 +6,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::bytes::BytesMut;
 use tokio_util::codec::Decoder;
 
-use crate::models::{BrokerCommand, BrokerResponse, PartitionCommand, PartitionResponse};
+use crate::models::{BrokerCommand, BrokerResponse, PartitionCommand, PartitionWriterResponse};
 
 pub async fn handle_producer_request(
     socket: &mut TcpStream,
@@ -16,11 +16,11 @@ pub async fn handle_producer_request(
     let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerResponse>();
     let mut message_batch_codec = MessageBatchCodec;
 
-    match fetch_next_message_batch(socket, &mut message_batch_codec).await {
+    match read_messages_from_socket(socket, &mut message_batch_codec).await {
         Some(message_batch) => {
             let message_count = message_batch.messages.len();
-            tracing::info!("Received message batch of messages: {:?}", message_count);
-            let find_partition_manager_command: BrokerCommand = BrokerCommand::GetPartitionManager {
+            tracing::info!("Received {} messages for {}", message_count, message_batch.topic_name);
+            let find_partition_manager_command: BrokerCommand = BrokerCommand::GetPartitionWriter {
                 topic_name: message_batch.topic_name,
                 broker_tx: broker_oneshot_tx,
             };
@@ -59,7 +59,8 @@ async fn send_messages_to_partition_manager(
 
     match rx.await {
         Ok(response) => match response {
-            PartitionResponse::MessagesPersisted { count } => ClusterResponse::MessagesPersisted { count },
+            PartitionWriterResponse::MessagesPersisted { count } => ClusterResponse::MessagesPersisted { count },
+            PartitionWriterResponse::InternalError { message } => ClusterResponse::InternalError { message },
         },
         Err(e) => ClusterResponse::InternalError {
             message: format!("Failed to receive partition response: {:?}", e),
@@ -67,7 +68,7 @@ async fn send_messages_to_partition_manager(
     }
 }
 
-async fn fetch_next_message_batch(socket: &mut TcpStream, codec: &mut MessageBatchCodec) -> Option<MessageBatch> {
+async fn read_messages_from_socket(socket: &mut TcpStream, codec: &mut MessageBatchCodec) -> Option<MessageBatch> {
     let mut buffer = BytesMut::with_capacity(1024);
     let bytes_read = socket.read_buf(&mut buffer).await.ok()?;
     tracing::debug!("Received {} bytes from socket", bytes_read);

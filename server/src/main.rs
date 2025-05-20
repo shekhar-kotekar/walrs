@@ -1,23 +1,26 @@
 use broker::Broker;
 use common::models::{ClientCommand, ClientType, ClusterResponse};
-use models::{BrokerCommand, BrokerResponse};
+use models::BrokerCommand;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
     signal::{
         self,
         unix::{signal, Signal, SignalKind},
     },
-    sync::{mpsc, oneshot},
+    sync::mpsc,
 };
 
-use handlers::producer_handler::handle_producer_request;
+use request_handlers::{
+    admin::handle_admin_request, commons::read_client_command, consumer::handle_consumer_request,
+    producer::handle_producer_request,
+};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 mod broker;
-mod handlers;
 mod models;
 mod partition;
+mod request_handlers;
 
 // TODO: Read all the constants from a config file
 const WALRS_PORT: u16 = 5056;
@@ -84,66 +87,13 @@ async fn main() {
     tracing::info!("Exiting main.");
 }
 
-async fn read_client_command(socket: &mut TcpStream) -> Option<ClientCommand> {
-    let mut buffer = [0u8; 1024];
-    let bytes_read = socket.read(&mut buffer).await.ok()?;
-    let client_command: ClientCommand = bincode::deserialize(&buffer[..bytes_read]).ok()?;
-    Some(client_command)
-}
-
 async fn validate_client_request_to_connect(client_type: &ClientType, socket: &mut TcpStream) {
     let response = match client_type {
         ClientType::Producer => ClusterResponse::ConnectionAccepted,
-        ClientType::Consumer => ClusterResponse::ConnectionRejected {
-            reason: "Not supported yet".to_string(),
-        },
+        ClientType::Consumer { topic_name } => ClusterResponse::ConnectionAccepted,
         ClientType::Admin => ClusterResponse::ConnectionAccepted,
     };
     socket.write_all(&bincode::serialize(&response).unwrap()).await.unwrap();
-}
-
-async fn handle_admin_request(socket: &mut TcpStream, broker_tx: mpsc::Sender<BrokerCommand>) -> ClusterResponse {
-    tracing::debug!("Handling admin request from: {}", socket.peer_addr().unwrap());
-
-    let next_command = read_client_command(socket).await;
-    match next_command {
-        Some(command) => match command {
-            ClientCommand::CreateTopic {
-                topic_name,
-                num_partitions,
-                retention_period_hours,
-            } => {
-                let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerResponse>();
-                let broker_command: BrokerCommand = BrokerCommand::CreateNewTopic {
-                    topic_name,
-                    num_partitions,
-                    retention_period_hours,
-                    broker_tx: broker_oneshot_tx,
-                };
-                broker_tx.send(broker_command).await.unwrap();
-                // Wait for the broker's response
-                match broker_rx.await {
-                    Ok(response) => response.to_cluster_response(),
-                    Err(e) => ClusterResponse::InternalError {
-                        message: format!("Error details: {:?}", e),
-                    },
-                }
-            }
-            _ => ClusterResponse::InternalError {
-                message: "Unknown admin command".to_string(),
-            },
-        },
-        None => ClusterResponse::InternalError {
-            message: "Failed to read admin command".to_string(),
-        },
-    }
-}
-
-async fn handle_consumer_request(_: &mut TcpStream) -> ClusterResponse {
-    tracing::info!("Consumer client connected");
-    ClusterResponse::ConnectionRejected {
-        reason: "Consumers are not allowed to connect (yet)".to_string(),
-    }
 }
 
 async fn process_client_request(
@@ -164,7 +114,7 @@ async fn process_client_request(
         }
         _ = async {
             let client_command = read_client_command(&mut socket).await;
-            let response: ClusterResponse = match client_command {
+            let response = match client_command {
                 Some(command) => {
                     tracing::debug!("Received client command: {:?}", command);
                     match command {
@@ -172,12 +122,14 @@ async fn process_client_request(
                             tracing::info!("Client requested to connect: {:?}", client_type);
                             validate_client_request_to_connect(&client_type, &mut socket).await;
 
-                            let response = match &client_type {
+                            match &client_type {
                                 ClientType::Producer =>  handle_producer_request(&mut socket, broker_tx).await,
-                                ClientType::Consumer => handle_consumer_request(&mut socket).await,
+                                ClientType::Consumer { topic_name } => {
+                                    let consumer_response = handle_consumer_request(topic_name, broker_tx).await;
+                                    ClusterResponse::ConsumerResponse(consumer_response)
+                                },
                                 ClientType::Admin => handle_admin_request(&mut socket, broker_tx).await,
-                            };
-                            response
+                            }
                         }
                         _ => {
                             tracing::warn!("Unknown client command: {:?}", command);
