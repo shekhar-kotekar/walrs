@@ -3,7 +3,7 @@ use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug, Clone)]
 pub enum PartitionResponse {
-    MessagesPersisted,
+    MessagesPersisted { count: u8 },
 }
 
 pub enum PartitionCommand {

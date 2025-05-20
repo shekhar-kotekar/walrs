@@ -23,10 +23,11 @@ impl Partition {
                 Some(command) = main_rx.recv() => {
                     match command {
                         PartitionCommand::WriteMessages { messages, tx } => {
+                            let message_count = messages.len() as u8;
                             for message in messages {
                                 tracing::info!("Writing message to partition {}: {:?}", self.topic, message);
                             }
-                            let _ = tx.send(PartitionResponse::MessagesPersisted);
+                            let _ = tx.send(PartitionResponse::MessagesPersisted { count: message_count });
                         }
                     }
                 }

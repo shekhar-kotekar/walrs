@@ -32,10 +32,16 @@ fn send_messages(topic_name: &str) {
     };
     let mut producer = Producer::new(vec!["127.0.0.1:5056".into()]);
     producer.send(topic_name.to_owned(), first_message);
+    producer.send(
+        topic_name.to_owned(),
+        Message {
+            payload: "second_message".as_bytes().to_vec(),
+        },
+    );
     let cluster_response: ClusterResponse = producer.flush();
     match cluster_response {
-        ClusterResponse::MessagesPersisted => {
-            tracing::info!("Messages successfully persisted.");
+        ClusterResponse::MessagesPersisted { count } => {
+            tracing::info!("{} Messages successfully persisted.", count);
         }
         e => {
             tracing::error!("Failed to persist messages because: {:?}", e);

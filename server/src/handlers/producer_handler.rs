@@ -1,5 +1,6 @@
 use common::message_batch::{MessageBatch, MessageBatchCodec};
 use common::models::{ClusterResponse, Message};
+use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::bytes::BytesMut;
@@ -58,7 +59,7 @@ async fn send_messages_to_partition_manager(
 
     match rx.await {
         Ok(response) => match response {
-            PartitionResponse::MessagesPersisted => ClusterResponse::MessagesPersisted,
+            PartitionResponse::MessagesPersisted { count } => ClusterResponse::MessagesPersisted { count },
         },
         Err(e) => ClusterResponse::InternalError {
             message: format!("Failed to receive partition response: {:?}", e),
@@ -67,9 +68,8 @@ async fn send_messages_to_partition_manager(
 }
 
 async fn fetch_next_message_batch(socket: &mut TcpStream, codec: &mut MessageBatchCodec) -> Option<MessageBatch> {
-    let mut buf = BytesMut::new();
-    socket.readable().await.unwrap();
-    socket.try_read_buf(&mut buf).unwrap();
-
-    codec.decode(&mut buf).unwrap()
+    let mut buffer = BytesMut::with_capacity(1024);
+    let bytes_read = socket.read_buf(&mut buffer).await.ok()?;
+    tracing::debug!("Received {} bytes from socket", bytes_read);
+    codec.decode(&mut buffer).unwrap()
 }

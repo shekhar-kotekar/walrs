@@ -51,7 +51,7 @@ pub enum ClusterResponse {
     InternalError { message: String },
     ConnectionAccepted,
     ConnectionRejected { reason: String },
-    MessagesPersisted,
+    MessagesPersisted { count: u8 },
 }
 
 impl ClusterResponse {

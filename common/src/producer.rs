@@ -27,6 +27,7 @@ impl Producer {
     }
 
     pub fn flush(&mut self) -> ClusterResponse {
+        tracing::info!("Flushing producer buffer...");
         let mut stream = TcpStream::connect(&self.brokers[0]).unwrap();
         match authenticator::authenticate(&mut stream, ClientType::Producer) {
             Some(ClusterResponse::ConnectionAccepted) => {
@@ -40,6 +41,10 @@ impl Producer {
                         topic_name: topic,
                         messages: messages,
                     };
+                    tracing::info!(
+                        "Sending message batch to partition manager: {:?}",
+                        message_batch_to_send
+                    );
                     let mut buf = BytesMut::new();
                     codec
                         .encode(message_batch_to_send, &mut buf)
@@ -48,7 +53,7 @@ impl Producer {
                 });
 
                 stream.flush().unwrap();
-
+                tracing::info!("Producer buffer flushed successfully.");
                 ClusterResponse::deserialize(&mut stream).unwrap()
             }
             _ => {
