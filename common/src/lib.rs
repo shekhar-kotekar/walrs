@@ -1,7 +1,11 @@
 use tracing_subscriber::fmt::format::FmtSpan;
 
-pub mod codecs;
+pub mod admin;
+mod authenticator;
+pub mod broker_response;
+pub mod message_batch;
 pub mod models;
+pub mod producer;
 
 pub fn enable_tracing() {
     // let file_appender = tracing_appender::rolling::daily("/tmp/kraft-rs/logs/", "kraft-rs.log");

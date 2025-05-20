@@ -1,3 +1,5 @@
+use std::{io::Read, net::TcpStream};
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -5,16 +7,9 @@ pub struct Message {
     pub payload: Vec<u8>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MessageBatch {
-    pub topic_name: String,
-    pub messages: Vec<Message>,
-    pub ack_level: AckLevel,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum AckLevel {
-    NoAck = 0,
+    None = 0,
     Leader = 1,
     All = 2,
 }
@@ -22,7 +17,7 @@ pub enum AckLevel {
 impl From<u8> for AckLevel {
     fn from(value: u8) -> Self {
         match value {
-            0 => AckLevel::NoAck,
+            0 => AckLevel::None,
             1 => AckLevel::Leader,
             _ => AckLevel::All,
         }
@@ -34,34 +29,36 @@ pub enum ClientCommand {
     CreateTopic {
         topic_name: String,
         num_partitions: u8,
-        retention_period_hours: u64,
+        retention_period_hours: u16,
     },
-    RequestToProduce {
-        topic_name: String,
-    },
-    RequestToStop {
-        topic_name: String,
+    RequestToConnect {
+        client_type: ClientType,
     },
 }
 
-#[derive(Serialize, Deserialize)]
-pub enum BrokerResponse {
-    TopicCreated {
-        leader_address: String,
-    },
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ClientType {
+    Producer,
+    Consumer,
+    Admin,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum ClusterResponse {
+    TopicCreated { leader_address: String },
     TopicAlreadyExists,
     TopicNotFound,
-    ProducerAcknowledged {
-        topic_name: String,
-        partition_port: u16,
-    },
-    ProducerNotAcknowledged {
-        topic_name: String,
-    },
-    ProducerStopAcknowledged {
-        topic_name: String,
-    },
-    InternalError {
-        message: String,
-    },
+    InternalError { message: String },
+    ConnectionAccepted,
+    ConnectionRejected { reason: String },
+    MessagesPersisted,
+}
+
+impl ClusterResponse {
+    pub fn deserialize(stream: &mut TcpStream) -> Option<ClusterResponse> {
+        let mut buffer = [0u8; 64];
+        let bytes_read = stream.read(&mut buffer).ok()?;
+        let broker_response: ClusterResponse = bincode::deserialize(&buffer[..bytes_read]).ok()?;
+        Some(broker_response)
+    }
 }

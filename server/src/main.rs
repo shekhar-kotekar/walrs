@@ -1,238 +1,402 @@
-use common::{
-    enable_tracing,
-    models::{BrokerResponse, ClientCommand},
-};
-use models::{MainCommands, NodeResponse};
-use partition::Partition;
-use rand::{thread_rng, Rng};
-use std::{process::Command, time::Duration};
+use broker::Broker;
+use common::models::{ClientCommand, ClientType, ClusterResponse};
+use models::{BrokerCommand, BrokerResponse};
 use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    signal,
+    signal::{
+        self,
+        unix::{signal, Signal, SignalKind},
+    },
     sync::{mpsc, oneshot},
 };
+
+use handlers::producer_handler::handle_producer_request;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
+mod broker;
+mod handlers;
 mod models;
 mod partition;
-mod partitions;
 
 // TODO: Read all the constants from a config file
-const NODE_MANAGER_PORT: u16 = 5056;
-const WALRS_PORT: u16 = 5055;
-const SLEEP_TIME_IN_SECONDS: u64 = 5;
-const K8S_SERVICE_NAME: &str = "walrs-headless-service.walrs.svc.cluster.local";
+const WALRS_PORT: u16 = 5056;
+// const NODE_MANAGER_PORT: u16 = 5055;
 const MPSC_MAX_Q_SIZE: usize = 100;
-const MIN_HEARTBEAT_INTERVAL_MS: u64 = 1000;
-const MAX_HEARTBEAT_INTERVAL_MS: u64 = 20000;
+// const SLEEP_TIME_IN_SECONDS: u64 = 5;
+// const K8S_SERVICE_NAME: &str = "walrs-headless-service.walrs.svc.cluster.local";
 
-// Main will be responsible for external facing communication like producer or consumer requests.
-// Internal communication will be handled by Node and partition managers.
-// So we will need 2-4 sockets in total.
-// Advantage of this approach is that Main thread does not need to manage all type of requests.
+// Topic names are case sensitive.
 #[tokio::main]
 async fn main() {
-    enable_tracing();
-
-    let pod_ip: String = std::env::var("POD_IP").unwrap();
-    let sleep_interval: u64 =
-        thread_rng().gen_range(MIN_HEARTBEAT_INTERVAL_MS..MAX_HEARTBEAT_INTERVAL_MS);
-    let node_address = format!("{}:{}", pod_ip, NODE_MANAGER_PORT);
+    common::enable_tracing();
+    let pod_ip: String = std::env::var("POD_IP").expect("POD_IP environment variable not set.");
+    let address = format!("{}:{}", pod_ip, WALRS_PORT);
 
     let task_tracker = TaskTracker::new();
     let cancellation_token = CancellationToken::new();
 
-    let (main_tx, main_rx) = mpsc::channel::<MainCommands>(MPSC_MAX_Q_SIZE);
+    let broker_cancellation_token = cancellation_token.child_token();
+    let mut broker = Broker::new(address.clone(), broker_cancellation_token);
 
-    let local_node = Partition::new_follower(node_address);
-    let node_cancellation_token = cancellation_token.child_token();
-    task_tracker.spawn(async move {
-        local_node
-            .run(main_rx, sleep_interval, node_cancellation_token)
-            .await;
-    });
+    let (main_tx, main_rx) = mpsc::channel::<BrokerCommand>(MPSC_MAX_Q_SIZE);
 
-    let search_nodes_cancellation_token = cancellation_token.child_token();
-    let pod_ip_clone = pod_ip.clone();
-    task_tracker.spawn(async move {
-        search_nodes_in_cluster(
-            K8S_SERVICE_NAME,
-            main_tx,
-            search_nodes_cancellation_token,
-            &pod_ip_clone,
-        )
-        .await;
-    });
+    task_tracker.spawn(async move { broker.start(main_rx).await });
 
-    //TODO: How to get the list of peers from the cluster periodically?
-    // let peers = get_cluster_info(&pod_ip, Duration::from_secs(SLEEP_TIME_IN_SECONDS));
-
-    let main_tcp_listener = TcpListener::bind(format!("{}:{}", pod_ip, WALRS_PORT))
-        .await
-        .unwrap();
-
+    let main_tcp_listener = TcpListener::bind(address).await.unwrap();
     tracing::debug!("Listening on: {}", main_tcp_listener.local_addr().unwrap());
+
+    let mut sigterm: Signal = signal(SignalKind::terminate()).expect("Failed to create signal handler");
 
     tokio::select! {
         _ = async {
             loop {
                 let (socket, _) = main_tcp_listener.accept().await.unwrap();
+                let main_tx_clone = main_tx.clone();
+                let client_request_cancellation_token = cancellation_token.child_token();
                 task_tracker.spawn(async move {
-                    process_external_request(socket).await;
+                    process_client_request(socket, main_tx_clone, client_request_cancellation_token).await;
                 });
             }
         } => {
             tracing::info!("Main listener closed.");
         },
-        _ = signal::ctrl_c() => {
-            tracing::info!("Received Ctrl-C signal. Cancelling all tasks.");
+        _ = sigterm.recv() => {
+            tracing::info!("Received SIGTERM signal. Cancelling all tasks.");
             cancellation_token.cancel();
             task_tracker.close();
             task_tracker.wait().await;
             tracing::info!("All tasks cancelled.");
         }
+        _ = signal::ctrl_c() => {
+            tracing::info!("Received Ctrl-C signal. Cancelling all tasks.");
+
+            cancellation_token.cancel();
+            tracing::info!("Cancellation token cancelled.");
+
+            task_tracker.close();
+            tracing::info!("Task tracker closed.");
+
+            task_tracker.wait().await;
+            tracing::info!("Task tracker wait is over. All tasks cancelled.");
+        }
     }
     tracing::info!("Exiting main.");
 }
 
-async fn process_external_request(socket: TcpStream) {
-    let (reader, writer) = socket.into_split();
-    let mut buffer = [0u8; 48];
-    tracing::debug!(
-        "Processing external request from: {}",
-        reader.peer_addr().unwrap()
-    );
-    match reader.try_read(&mut buffer) {
-        Ok(0) => {
-            tracing::info!("Connection closed for: {}", reader.peer_addr().unwrap());
-        }
-        Ok(bytes_read) => {
-            let client_command: ClientCommand =
-                bincode::deserialize(&buffer[..bytes_read]).unwrap();
-            let broker_response: BrokerResponse = match client_command {
-                ClientCommand::CreateTopic {
+async fn read_client_command(socket: &mut TcpStream) -> Option<ClientCommand> {
+    let mut buffer = [0u8; 1024];
+    let bytes_read = socket.read(&mut buffer).await.ok()?;
+    let client_command: ClientCommand = bincode::deserialize(&buffer[..bytes_read]).ok()?;
+    Some(client_command)
+}
+
+async fn validate_client_request_to_connect(client_type: &ClientType, socket: &mut TcpStream) {
+    let response = match client_type {
+        ClientType::Producer => ClusterResponse::ConnectionAccepted,
+        ClientType::Consumer => ClusterResponse::ConnectionRejected {
+            reason: "Not supported yet".to_string(),
+        },
+        ClientType::Admin => ClusterResponse::ConnectionAccepted,
+    };
+    socket.write_all(&bincode::serialize(&response).unwrap()).await.unwrap();
+}
+
+async fn handle_admin_request(socket: &mut TcpStream, broker_tx: mpsc::Sender<BrokerCommand>) -> ClusterResponse {
+    tracing::debug!("Handling admin request from: {}", socket.peer_addr().unwrap());
+
+    let next_command = read_client_command(socket).await;
+    match next_command {
+        Some(command) => match command {
+            ClientCommand::CreateTopic {
+                topic_name,
+                num_partitions,
+                retention_period_hours,
+            } => {
+                let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerResponse>();
+                let broker_command: BrokerCommand = BrokerCommand::CreateNewTopic {
                     topic_name,
                     num_partitions,
                     retention_period_hours,
-                } => {
-                    tracing::info!(
-                        "Received command to create topic '{}' with {} partitions and {} hours retention period.",
-                        topic_name,
-                        num_partitions,
-                        retention_period_hours
-                    );
-                    BrokerResponse::InternalError {
-                        message: "Not Implemented".to_string(),
+                    broker_tx: broker_oneshot_tx,
+                };
+                broker_tx.send(broker_command).await.unwrap();
+                // Wait for the broker's response
+                match broker_rx.await {
+                    Ok(response) => response.to_cluster_response(),
+                    Err(e) => ClusterResponse::InternalError {
+                        message: format!("Error details: {:?}", e),
+                    },
+                }
+            }
+            _ => ClusterResponse::InternalError {
+                message: "Unknown admin command".to_string(),
+            },
+        },
+        None => ClusterResponse::InternalError {
+            message: "Failed to read admin command".to_string(),
+        },
+    }
+}
+
+async fn handle_consumer_request(_: &mut TcpStream) -> ClusterResponse {
+    tracing::info!("Consumer client connected");
+    ClusterResponse::ConnectionRejected {
+        reason: "Consumers are not allowed to connect (yet)".to_string(),
+    }
+}
+
+async fn process_client_request(
+    mut socket: TcpStream,
+    broker_tx: mpsc::Sender<BrokerCommand>,
+    cancellation_token: CancellationToken,
+) {
+    tracing::debug!("Processing request from: {}", socket.peer_addr().unwrap());
+    tokio::select! {
+        _ = cancellation_token.cancelled() => {
+            tracing::info!("Cancellation token called. Stopping processing request.");
+            let internal_server_error = ClusterResponse::InternalError {
+                message: "Request processing was cancelled".to_string(),
+            };
+            socket.write_all(&bincode::serialize(&internal_server_error).unwrap()).await.unwrap();
+            socket.shutdown().await.unwrap();
+            return;
+        }
+        _ = async {
+            let client_command = read_client_command(&mut socket).await;
+            let response: ClusterResponse = match client_command {
+                Some(command) => {
+                    tracing::debug!("Received client command: {:?}", command);
+                    match command {
+                        ClientCommand::RequestToConnect { client_type } => {
+                            tracing::info!("Client requested to connect: {:?}", client_type);
+                            validate_client_request_to_connect(&client_type, &mut socket).await;
+
+                            let response = match &client_type {
+                                ClientType::Producer =>  handle_producer_request(&mut socket, broker_tx).await,
+                                ClientType::Consumer => handle_consumer_request(&mut socket).await,
+                                ClientType::Admin => handle_admin_request(&mut socket, broker_tx).await,
+                            };
+                            response
+                        }
+                        _ => {
+                            tracing::warn!("Unknown client command: {:?}", command);
+                            ClusterResponse::InternalError {
+                                message: "Unknown client command".to_string(),
+                            }
+                        }
                     }
                 }
-                ClientCommand::RequestToProduce { topic_name } => {
-                    tracing::info!("Received command to produce to topic: {}", topic_name);
-                    BrokerResponse::InternalError {
-                        message: "Not Implemented".to_string(),
-                    }
-                }
-                ClientCommand::RequestToStop { topic_name } => {
-                    tracing::info!(
-                        "Received command to stop producing to topic: {}",
-                        topic_name
-                    );
-                    BrokerResponse::InternalError {
-                        message: "Not Implemented".to_string(),
+                None => {
+                    tracing::error!("Failed to deserialize client command");
+                    ClusterResponse::InternalError {
+                        message: "Failed to deserialize client command".to_string(),
                     }
                 }
             };
-            let response = bincode::serialize(&broker_response);
-            writer.try_write(&response.unwrap()).unwrap();
-        }
-        Err(e) => {
-            tracing::error!("Error reading from stream: {:?}", e);
+            tracing::debug!("response from cluster: {:?}", response);
+            socket.write_all(&bincode::serialize(&response).unwrap()).await.unwrap();
+            tracing::debug!("Response sent to client: {}", socket.peer_addr().unwrap());
+        } => {
+            tracing::info!("Client request processing completed.");
         }
     }
 }
 
-// fn get_cluster_info(pod_ip: &str, sleep_duration_seconds: Duration) -> Vec<Node> {
-//     let mut try_count = 0;
-//     loop {
-//         let nodes: Vec<String> = dig_cluster_nodes(K8S_SERVICE_NAME, pod_ip);
-//         if nodes.is_empty() {
-//             try_count += 1;
-//             if try_count >= MAX_RETRIES {
-//                 panic!(
-//                     "No nodes found in the cluster after {} tries. Exiting...",
-//                     MAX_RETRIES
-//                 );
+// Main will be responsible for external facing communication like producer or consumer requests.
+// Internal communication will be handled by Node and partition managers.
+// So we will need 2-4 sockets in total.
+// Advantage of this approach is that Main thread does not need to manage all type of requests.
+// #[tokio::main]
+// async fn main() {
+//     enable_tracing();
+
+//     let pod_ip: String = std::env::var("POD_IP").unwrap();
+
+//     let task_tracker = TaskTracker::new();
+//     let cancellation_token = CancellationToken::new();
+
+//     let (main_tx, main_rx) = mpsc::channel::<MainCommands>(MPSC_MAX_Q_SIZE);
+
+//     // let local_node = Partition::new_follower(node_address);
+//     // let node_cancellation_token = cancellation_token.child_token();
+//     // task_tracker.spawn(async move {
+//     //     local_node
+//     //         .run(main_rx, sleep_interval, node_cancellation_token)
+//     //         .await;
+//     // });
+
+//     let search_nodes_cancellation_token = cancellation_token.child_token();
+//     let pod_ip_clone = pod_ip.clone();
+//     task_tracker.spawn(async move {
+//         search_nodes_in_cluster(
+//             K8S_SERVICE_NAME,
+//             main_tx,
+//             search_nodes_cancellation_token,
+//             &pod_ip_clone,
+//         )
+//         .await;
+//     });
+
+//     //TODO: How to get the list of peers from the cluster periodically?
+//     // let peers = get_cluster_info(&pod_ip, Duration::from_secs(SLEEP_TIME_IN_SECONDS));
+
+//     let main_tcp_listener = TcpListener::bind(format!("{}:{}", pod_ip, WALRS_PORT))
+//         .await
+//         .unwrap();
+
+//     tracing::debug!("Listening on: {}", main_tcp_listener.local_addr().unwrap());
+
+//     let mut sigterm: Signal =
+//         signal(SignalKind::terminate()).expect("Failed to create signal handler");
+
+//     tokio::select! {
+//         _ = async {
+//             loop {
+//                 let (socket, _) = main_tcp_listener.accept().await.unwrap();
+//                 task_tracker.spawn(async move {
+//                     process_client_request(socket).await;
+//                 });
 //             }
-//             tracing::warn!(
-//                 "No nodes found in the cluster. Will retry after {} seconds.",
-//                 SLEEP_TIME_IN_SECONDS
-//             );
-//             thread::sleep(sleep_duration_seconds);
-//         } else {
-//             tracing::info!("Found {} nodes in the cluster.", nodes.len());
-//             return nodes
-//                 .iter()
-//                 .map(|peer_ip_address| {
-//                     let peer_address = format!("{}:{}", peer_ip_address, NODE_MANAGER_PORT);
-//                     tracing::info!("peer address: {}", peer_address);
-//                     Node::new_follower(peer_address, 0)
-//                 })
-//                 .collect::<Vec<Node>>();
+//         } => {
+//             tracing::info!("Main listener closed.");
+//         },
+//         _ = sigterm.recv() => {
+//             tracing::info!("Received SIGTERM signal. Cancelling all tasks.");
+//             cancellation_token.cancel();
+//             task_tracker.close();
+//             task_tracker.wait().await;
+//             tracing::info!("All tasks cancelled.");
+//         }
+//         _ = signal::ctrl_c() => {
+//             tracing::info!("Received Ctrl-C signal. Cancelling all tasks.");
+//             cancellation_token.cancel();
+//             task_tracker.close();
+//             task_tracker.wait().await;
+//             tracing::info!("All tasks cancelled.");
+//         }
+//     }
+//     tracing::info!("Exiting main.");
+// }
+
+// async fn process_client_request(socket: TcpStream) {
+//     let (reader, writer) = socket.into_split();
+//     let mut buffer = [0u8; 48];
+//     tracing::debug!(
+//         "Processing external request from: {}",
+//         reader.peer_addr().unwrap()
+//     );
+//     match reader.try_read(&mut buffer) {
+//         Ok(0) => {
+//             tracing::info!("Connection closed for: {}", reader.peer_addr().unwrap());
+//         }
+//         Ok(bytes_read) => {
+//             let client_command: ClientCommand =
+//                 bincode::deserialize(&buffer[..bytes_read]).unwrap();
+//             let broker_response: BrokerResponse = match client_command {
+//                 ClientCommand::CreateTopic {
+//                     topic_name,
+//                     num_partitions,
+//                     retention_period_hours,
+//                 } => {
+//                     tracing::info!(
+//                         "Received command to create topic '{}' with {} partitions and {} hours retention period.",
+//                         topic_name,
+//                         num_partitions,
+//                         retention_period_hours
+//                     );
+//                     BrokerResponse::InternalError {
+//                         message: "Not Implemented".to_string(),
+//                     }
+//                 }
+//                 ClientCommand::RequestToProduce { topic_name } => {
+//                     tracing::info!("Received command to produce to topic: {}", topic_name);
+//                     BrokerResponse::InternalError {
+//                         message: "Not Implemented".to_string(),
+//                     }
+//                 }
+//                 ClientCommand::RequestToStop { topic_name } => {
+//                     tracing::info!(
+//                         "Received command to stop producing to topic: {}",
+//                         topic_name
+//                     );
+//                     BrokerResponse::InternalError {
+//                         message: "Not Implemented".to_string(),
+//                     }
+//                 }
+//             };
+//             let response = bincode::serialize(&broker_response);
+//             writer.try_write(&response.unwrap()).unwrap();
+//         }
+//         Err(e) => {
+//             tracing::error!("Error reading from stream: {:?}", e);
 //         }
 //     }
 // }
 
-async fn search_nodes_in_cluster(
-    service_name: &str,
-    main_tx: mpsc::Sender<MainCommands>,
-    cancellation_token: CancellationToken,
-    pod_ip: &str,
-) {
-    let mut interval = tokio::time::interval(Duration::from_secs(SLEEP_TIME_IN_SECONDS));
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    loop {
-        tokio::select! {
-            _ = interval.tick() => {
-                let peers_in_cluster = dig_cluster_nodes(service_name, pod_ip);
-                for peer in peers_in_cluster {
-                    let peer_address = format!("{}:{}", peer, NODE_MANAGER_PORT);
-                    let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeResponse>();
-                    main_tx.send(MainCommands::AddPeer {
-                        peer_address,
-                        tx:oneshot_tx,
-                    }).await.unwrap();
-                    match oneshot_rx.await {
-                        Ok(NodeResponse::PeerAdded) => {
-                            tracing::info!("Peer added successfully.");
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to add peer.: {:?}", e);
-                        }
-                    }
-                }
-            }
-            _ = cancellation_token.cancelled() => {
-                tracing::debug!("Cancelling search_nodes_in_cluster task.");
-                break;
-            }
-        }
-    }
-}
+// async fn search_nodes_in_cluster(
+//     service_name: &str,
+//     main_tx: mpsc::Sender<MainCommands>,
+//     cancellation_token: CancellationToken,
+//     pod_ip: &str,
+// ) {
+//     let mut interval = tokio::time::interval(Duration::from_secs(SLEEP_TIME_IN_SECONDS));
+//     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+//     loop {
+//         tokio::select! {
+//             _ = interval.tick() => {
+//                 let peers_in_cluster = dig_cluster_nodes(service_name, pod_ip);
+//                 tracing::debug!("Found these peers in cluster: {:?}", peers_in_cluster);
+//                 for peer in peers_in_cluster {
+//                     let peer_address = format!("{}:{}", peer, NODE_MANAGER_PORT);
+//                     let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeResponse>();
+//                     main_tx.send(MainCommands::AddPeer {
+//                         peer_address,
+//                         tx:oneshot_tx,
+//                     }).await.unwrap();
+//                     match oneshot_rx.await {
+//                         Ok(NodeResponse::PeerAdded) => {
+//                             tracing::info!("Peer added successfully.");
+//                         }
+//                         Err(e) => {
+//                             tracing::error!("Failed to add peer.: {:?}", e);
+//                         }
+//                     }
+//                 }
+//             }
+//             _ = cancellation_token.cancelled() => {
+//                 tracing::debug!("Cancelling search_nodes_in_cluster task.");
+//                 break;
+//             }
+//         }
+//     }
+// }
 
-fn dig_cluster_nodes(service_name: &str, pod_ip: &str) -> Vec<String> {
-    tracing::debug!("Running dig command for {} service.", service_name);
-    let output = Command::new("dig")
-        .args(["+short", "+search", service_name])
-        .output()
-        .expect("Failed to execute dig command...");
+// fn dig_cluster_nodes(service_name: &str, pod_ip: &str) -> Vec<String> {
+//     let output = Command::new("dig")
+//         .args(["+short", "+search", service_name])
+//         .output()
+//         .expect("Failed to execute dig command...");
 
-    if output.status.success() {
-        let output = String::from_utf8_lossy(&output.stdout);
-        output
-            .split("\n")
-            .map(|ip| ip.trim().to_string())
-            .filter(|ip| !ip.is_empty() && ip != pod_ip)
-            .collect()
-    } else {
-        Vec::new()
-    }
-}
+//     if output.status.success() {
+//         let output = String::from_utf8_lossy(&output.stdout);
+//         output
+//             .split("\n")
+//             .map(|ip| ip.trim().to_string())
+//             .filter(|ip| !ip.is_empty() && ip != pod_ip)
+//             .collect()
+//     } else {
+//         Vec::new()
+//     }
+// }
+
+// pub enum MainCommands {
+//     AddPeer {
+//         peer_address: String,
+//         tx: oneshot::Sender<NodeResponse>,
+//     },
+// }
+
+// pub enum NodeResponse {
+//     PeerAdded,
+// }
