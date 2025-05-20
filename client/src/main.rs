@@ -17,35 +17,42 @@ async fn main() {
         num_partitions: 3,
         retention_period_hours: 48,
     };
-    match admin.create_topic(command) {
-        ClusterResponse::TopicCreated { leader_address } => {
-            tracing::info!("Topic created successfully. Leader address: {}", leader_address);
-            send_messages(topic_name);
-            read_messages(topic_name, admin.brokers.clone()).await;
-        }
-        ClusterResponse::TopicAlreadyExists => {
-            tracing::info!("{} topic already exists.", topic_name);
-            send_messages(topic_name);
-            read_messages(topic_name, admin.brokers.clone()).await;
-        }
-        e => {
-            tracing::error!("Failed to create topic because: {:?}", e);
-        }
-    }
-}
-
-fn send_messages(topic_name: &str) {
     let first_message = Message {
         payload: "first_message".as_bytes().to_vec(),
     };
+    let second_message = Message {
+        payload: "second_message".as_bytes().to_vec(),
+    };
+    let sent_messages = vec![first_message, second_message];
+    let received_messages: Vec<Message> = match admin.create_topic(command) {
+        ClusterResponse::TopicCreated { leader_address } => {
+            tracing::info!("Topic created successfully. Leader address: {}", leader_address);
+            send_messages(topic_name, sent_messages.clone());
+            read_messages(topic_name, admin.brokers.clone()).await
+        }
+        ClusterResponse::TopicAlreadyExists => {
+            tracing::info!("{} topic already exists.", topic_name);
+            send_messages(topic_name, sent_messages.clone());
+            read_messages(topic_name, admin.brokers.clone()).await
+        }
+        e => {
+            tracing::error!("Failed to create topic because: {:?}", e);
+            Vec::new()
+        }
+    };
+    // check if sent messages and received messages are same
+    if sent_messages == received_messages {
+        tracing::info!("All sent messages were received successfully.");
+    } else {
+        tracing::error!("Some sent messages were not received.");
+    }
+}
+
+fn send_messages(topic_name: &str, messages: Vec<Message>) {
     let mut producer = Producer::new(vec!["127.0.0.1:5056".into()]);
-    producer.send(topic_name.to_owned(), first_message);
-    producer.send(
-        topic_name.to_owned(),
-        Message {
-            payload: "second_message".as_bytes().to_vec(),
-        },
-    );
+    for message in messages {
+        producer.send(topic_name.to_owned(), message);
+    }
     let cluster_response: ClusterResponse = producer.flush();
     match cluster_response {
         ClusterResponse::MessagesPersisted { count } => {
@@ -57,7 +64,7 @@ fn send_messages(topic_name: &str) {
     }
 }
 
-async fn read_messages(topic_name: &str, brokers: Vec<String>) {
+async fn read_messages(topic_name: &str, brokers: Vec<String>) -> Vec<Message> {
     let mut consumer = Consumer::new(topic_name.to_owned(), brokers);
     match consumer.next_message().await {
         Some(message_batch) => {
@@ -65,9 +72,11 @@ async fn read_messages(topic_name: &str, brokers: Vec<String>) {
             message_batch.messages.iter().for_each(|m| {
                 tracing::info!("Received message: {:?}", m);
             });
+            message_batch.messages
         }
         None => {
             tracing::error!("Failed to receive message batch.");
+            Vec::new()
         }
     }
 }
