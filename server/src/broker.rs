@@ -8,21 +8,27 @@ use crate::{
     partition::{PartitionReader, PartitionWriter},
 };
 
+const MAX_MESSAGE_BATCH_SIZE: u8 = 3;
+
 #[derive(Debug)]
 pub struct Broker {
     address: String,
     partition_managers: HashMap<String, mpsc::Sender<PartitionCommand>>,
     topics_in_cluster: Vec<String>,
     cancellation_token: CancellationToken,
+    base_path_for_data: String,
 }
 
 impl Broker {
-    pub fn new(address: String, cancellation_token: CancellationToken) -> Self {
+    pub fn new(address: String, cancellation_token: CancellationToken, base_path_for_data: String) -> Self {
+        std::fs::create_dir_all(&base_path_for_data)
+            .expect(format!("Failed to create base directory: {}", base_path_for_data).as_str());
         Broker {
             address,
             partition_managers: HashMap::new(),
             topics_in_cluster: Vec::new(),
             cancellation_token,
+            base_path_for_data,
         }
     }
 
@@ -65,9 +71,12 @@ impl Broker {
             }
         } else {
             tracing::warn!("No partition reader found for topic: {}. Creating new", topic_name);
-            let mut partition_reader = PartitionReader {
-                topic: topic_name.clone(),
-            };
+            let mut partition_reader = PartitionReader::new(
+                topic_name.clone(),
+                0,
+                self.base_path_for_data.clone(),
+                MAX_MESSAGE_BATCH_SIZE,
+            );
             let (partition_reader_tx, partition_reader_rx) = mpsc::channel::<PartitionCommand>(100);
 
             let partition_cancellation_token = self.cancellation_token.child_token();
@@ -113,8 +122,11 @@ impl Broker {
 
             let partition_cancellation_token = self.cancellation_token.child_token();
             let topic_name_clone = topic_name.clone();
+            let partition_number = 0;
+            let partition_data_path = format!("{}/{}/{}", self.base_path_for_data, topic_name_clone, partition_number);
             tokio::spawn(async move {
-                let mut partition_writer = PartitionWriter::new(topic_name_clone);
+                let mut partition_writer =
+                    PartitionWriter::new(topic_name_clone, partition_number, partition_data_path);
                 partition_writer
                     .start(partition_writer_rx, partition_cancellation_token)
                     .await;
@@ -147,7 +159,11 @@ mod should {
     #[tokio::test]
     async fn test_broker_should_start() {
         let cancellation_token = CancellationToken::new();
-        let mut broker = Broker::new("local:1234".to_string(), cancellation_token.clone());
+        let mut broker = Broker::new(
+            "local:1234".to_string(),
+            cancellation_token.clone(),
+            "/tmp/walrs/test/".to_string(),
+        );
         let (_, main_rx) = mpsc::channel::<BrokerCommand>(2);
 
         tokio::spawn(async move { broker.start(main_rx).await });

@@ -1,16 +1,26 @@
 use common::models::Message;
-use tokio::sync::mpsc;
+use tokio::{fs::OpenOptions, io::AsyncWriteExt, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::models::{PartitionCommand, PartitionReaderResponse, PartitionWriterResponse};
+use tokio::io::AsyncBufReadExt;
 
 pub struct PartitionWriter {
-    topic: String,
+    base_path: String,
+    partition_name: String,
 }
 
 impl PartitionWriter {
-    pub fn new(topic: String) -> Self {
-        PartitionWriter { topic }
+    pub fn new(topic: String, partition_number: u8, base_path: String) -> Self {
+        let partition_name = format!("{}-{}", topic, partition_number);
+
+        std::fs::create_dir_all(&base_path)
+            .expect(format!("Failed to create partition directory: {}", partition_name).as_str());
+
+        PartitionWriter {
+            base_path,
+            partition_name,
+        }
     }
 
     pub async fn start(
@@ -18,7 +28,18 @@ impl PartitionWriter {
         mut main_rx: mpsc::Receiver<PartitionCommand>,
         cancellation_token: CancellationToken,
     ) {
-        tracing::info!("Starting partition manager for topic {}", self.topic);
+        tracing::info!("Starting partition manager for partition {}", self.partition_name);
+
+        let partition_path = format!("{}/data.log", self.base_path);
+        tracing::info!("Partition data will be stored at {}", partition_path);
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(partition_path)
+            .await
+            .expect(format!("Failed to open partition file for partition: {}", self.partition_name).as_str());
+
         loop {
             tokio::select! {
                 Some(command) = main_rx.recv() => {
@@ -26,7 +47,8 @@ impl PartitionWriter {
                         PartitionCommand::WriteMessages { messages, tx } => {
                             let message_count = messages.len() as u8;
                             for message in messages {
-                                tracing::debug!("Writing message to partition {}: {:?}", self.topic, message);
+                                file.write_all(&message.payload).await.expect("Failed to write message to partition");
+                                file.write_all(b"\n").await.expect("Failed to write newline to partition");
                             }
                             let _ = tx.send(PartitionWriterResponse::MessagesPersisted { count: message_count });
                         }
@@ -36,36 +58,85 @@ impl PartitionWriter {
                     }
                 }
                 _ = cancellation_token.cancelled() => {
-                    tracing::info!("Cancellation token called. Partition writer for topic {} shutting down...", self.topic);
+                    tracing::info!("Cancellation token called. Partition writer for partition {} shutting down...", self.partition_name);
+                    file.flush().await.expect("Failed to flush partition file");
+                    let _ = file.shutdown().await;
+                    tracing::info!("Partition file flushed & closed for partition: {}", self.partition_name);
                     break;
                 }
             }
         }
-        tracing::info!("Partition writer for topic {} stopped.", self.topic);
+        tracing::info!("Partition writer for partition {} stopped.", self.partition_name);
     }
 }
 
 pub struct PartitionReader {
-    pub topic: String,
+    topic_name: String,
+    pub message_batch_size: u8,
+    pub partition_name: String,
+    pub partition_path: String,
 }
 
 impl PartitionReader {
+    pub fn new(topic: String, partition_number: u8, base_path: String, message_batch_size: u8) -> Self {
+        let partition_name = format!("{}-{}", topic, partition_number);
+        let partition_path = format!("{}/{}/{}", base_path, topic, partition_number);
+
+        PartitionReader {
+            topic_name: topic,
+            message_batch_size,
+            partition_name,
+            partition_path,
+        }
+    }
+
+    async fn read_messages_from_file(&mut self, reader: &mut tokio::io::BufReader<tokio::fs::File>) -> Vec<Message> {
+        let mut messages = Vec::new();
+        let mut buf = String::new();
+
+        let mut lines_read = 0;
+        while lines_read < self.message_batch_size
+            && reader.read_line(&mut buf).await.expect(
+                format!(
+                    "Failed to read line from partition for partition: {}",
+                    self.partition_name
+                )
+                .as_str(),
+            ) > 0
+        {
+            let payload = buf.trim().as_bytes().to_vec();
+            messages.push(Message { payload });
+            buf.clear();
+            lines_read += 1;
+        }
+        messages
+    }
+
     pub async fn start(
         &mut self,
         mut main_rx: mpsc::Receiver<PartitionCommand>,
         cancellation_token: CancellationToken,
     ) {
-        tracing::info!("Starting partition reader for topic {}", self.topic);
+        tracing::info!("Starting partition reader for partition {}", self.partition_name);
+        tracing::info!("Partition data will be read from {}", self.partition_path);
+
+        let log_file_name = format!("{}/data.log", self.partition_path);
+        let file = OpenOptions::new()
+            .read(true)
+            .open(&log_file_name)
+            .await
+            .expect(format!("Failed to open partition file for reading: {}", self.partition_name).as_str());
+        let mut reader = tokio::io::BufReader::new(file);
+
         loop {
             tokio::select! {
                 Some(command) = main_rx.recv() => {
                     match command {
                         PartitionCommand::ReadMessages { topic_name, tx } => {
-                            if topic_name == self.topic {
-                                tracing::debug!("Reading messages from partition {}...", self.topic);
-                                let messages = vec![Message {
-                                    payload: "first_message".as_bytes().to_vec(),
-                                }]; // Simulate reading messages
+                            if topic_name == self.topic_name {
+                                tracing::debug!("Reading messages from partition {}...", self.partition_name);
+
+                                let messages = self.read_messages_from_file(&mut reader).await;
                                 let _ = tx.send(PartitionReaderResponse::MessagesRead { messages });
                             } else {
                                 let _ = tx.send(PartitionReaderResponse::InternalError {
@@ -79,11 +150,13 @@ impl PartitionReader {
                     }
                 }
                 _ = cancellation_token.cancelled() => {
-                    tracing::info!("Cancellation token called. Partition reader for topic {} shutting down...", self.topic);
+                    tracing::info!("Cancellation token called. Partition reader shutting down: {}", self.partition_name);
+                    let _ = reader.shutdown().await;
+                    tracing::info!("Partition reader file closed: {}", self.partition_name);
                     break;
                 }
             }
         }
-        tracing::info!("Partition reader for topic {} stopped.", self.topic);
+        tracing::info!("Partition reader stopped: {}", self.partition_name);
     }
 }

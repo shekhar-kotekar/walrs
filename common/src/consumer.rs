@@ -79,27 +79,6 @@ impl Consumer {
                 None
             }
         }
-
-        // let response = ConsumerResponse::deserialize(&mut self.stream);
-        // match response {
-        //     Some(ConsumerResponse::MessagesFetched { messages }) => {
-        //         let message_count = messages.len() as u128;
-        //         tracing::debug!("Fetched {} messages.", message_count);
-        //         self.previous_message_offset += message_count;
-        //         Some(MessageBatch {
-        //             topic_name: self.topic.clone(),
-        //             messages,
-        //         })
-        //     }
-        //     Some(ConsumerResponse::InternalError { message }) => {
-        //         tracing::error!("Failed to fetch messages: {}", message);
-        //         None
-        //     }
-        //     other => {
-        //         tracing::error!("Unexpected response while fetching messages: {:?}", other);
-        //         None
-        //     }
-        // }
     }
 }
 
