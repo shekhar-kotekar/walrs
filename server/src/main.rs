@@ -28,6 +28,7 @@ const WALRS_PORT: u16 = 5056;
 const MPSC_MAX_Q_SIZE: usize = 100;
 // const SLEEP_TIME_IN_SECONDS: u64 = 5;
 // const K8S_SERVICE_NAME: &str = "walrs-headless-service.walrs.svc.cluster.local";
+const BASE_PATH_FOR_DATA: &str = "/tmp/walrs/data";
 
 // Topic names are case sensitive.
 #[tokio::main]
@@ -40,7 +41,12 @@ async fn main() {
     let cancellation_token = CancellationToken::new();
 
     let broker_cancellation_token = cancellation_token.child_token();
-    let mut broker = Broker::new(address.clone(), broker_cancellation_token);
+    let mut broker = Broker::new(
+        address.clone(),
+        broker_cancellation_token,
+        BASE_PATH_FOR_DATA.to_string(),
+        MPSC_MAX_Q_SIZE,
+    );
 
     let (main_tx, main_rx) = mpsc::channel::<BrokerCommand>(MPSC_MAX_Q_SIZE);
 

@@ -26,6 +26,7 @@ pub async fn handle_consumer_request(topic_name: &String, broker_tx: mpsc::Sende
                 match partition_rx.await {
                     Ok(response) => match response {
                         PartitionReaderResponse::MessagesRead { messages } => {
+                            tracing::debug!("Fetched {} messages from partition of {}", messages.len(), topic_name);
                             ConsumerResponse::MessagesFetched { messages: messages }
                         }
                         PartitionReaderResponse::InternalError { message } => {

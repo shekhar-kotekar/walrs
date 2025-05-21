@@ -3,6 +3,10 @@ name = "server"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "walrs_server"
+path = "src/main.rs"
+
 [dependencies]
 common = { path = "../common" }
 uuid = { version = "1.11.0", features = ["v4", "serde"] }

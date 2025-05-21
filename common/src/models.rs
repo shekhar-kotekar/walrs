@@ -59,7 +59,7 @@ pub enum ClusterResponse {
 
 impl ClusterResponse {
     pub fn deserialize(stream: &mut TcpStream) -> Option<ClusterResponse> {
-        let mut buffer = [0u8; 64];
+        let mut buffer = [0u8; 2048];
         let bytes_read = stream.read(&mut buffer).ok()?;
         let broker_response: ClusterResponse = bincode::deserialize(&buffer[..bytes_read]).ok()?;
         Some(broker_response)
