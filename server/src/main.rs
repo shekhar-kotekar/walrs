@@ -45,6 +45,7 @@ async fn main() {
         address.clone(),
         broker_cancellation_token,
         BASE_PATH_FOR_DATA.to_string(),
+        MPSC_MAX_Q_SIZE,
     );
 
     let (main_tx, main_rx) = mpsc::channel::<BrokerCommand>(MPSC_MAX_Q_SIZE);

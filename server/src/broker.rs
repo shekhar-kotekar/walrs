@@ -17,10 +17,16 @@ pub struct Broker {
     topics_in_cluster: Vec<String>,
     cancellation_token: CancellationToken,
     base_path_for_data: String,
+    mpsc_max_queue_size: usize,
 }
 
 impl Broker {
-    pub fn new(address: String, cancellation_token: CancellationToken, base_path_for_data: String) -> Self {
+    pub fn new(
+        address: String,
+        cancellation_token: CancellationToken,
+        base_path_for_data: String,
+        mpsc_max_queue_size: usize,
+    ) -> Self {
         std::fs::create_dir_all(&base_path_for_data)
             .expect(format!("Failed to create base directory: {}", base_path_for_data).as_str());
         Broker {
@@ -29,6 +35,7 @@ impl Broker {
             topics_in_cluster: Vec::new(),
             cancellation_token,
             base_path_for_data,
+            mpsc_max_queue_size,
         }
     }
 
@@ -43,7 +50,7 @@ impl Broker {
                             let _ = broker_tx.send(response);
                         }
                         BrokerCommand::GetPartitionWriter { topic_name, broker_tx } => {
-                            let response = self.handle_get_partition_manager_command(topic_name).await;
+                            let response = self.handle_get_partition_writer_command(topic_name).await;
                             let _ = broker_tx.send(response);
                         }
                         BrokerCommand::GetPartitionReader { topic_name, broker_tx } => {
@@ -64,10 +71,10 @@ impl Broker {
 
     async fn handle_get_partition_reader_command(&mut self, topic_name: String) -> BrokerResponse {
         let partition_reader_name = format!("{}-reader", topic_name);
-        if let Some(partition_reader) = self.partition_managers.get(&partition_reader_name) {
+        if let Some(partition_reader_tx) = self.partition_managers.get(&partition_reader_name) {
             tracing::info!("Found partition reader for topic: {}", topic_name);
             BrokerResponse::PartitionManagerFound {
-                tx: partition_reader.clone(),
+                tx: partition_reader_tx.clone(),
             }
         } else {
             tracing::warn!("No partition reader found for topic: {}. Creating new", topic_name);
@@ -77,7 +84,8 @@ impl Broker {
                 self.base_path_for_data.clone(),
                 MAX_MESSAGE_BATCH_SIZE,
             );
-            let (partition_reader_tx, partition_reader_rx) = mpsc::channel::<PartitionCommand>(100);
+            let (partition_reader_tx, partition_reader_rx) =
+                mpsc::channel::<PartitionCommand>(self.mpsc_max_queue_size);
 
             let partition_cancellation_token = self.cancellation_token.child_token();
             tokio::spawn(async move {
@@ -94,7 +102,7 @@ impl Broker {
         }
     }
 
-    async fn handle_get_partition_manager_command(&mut self, topic_name: String) -> BrokerResponse {
+    async fn handle_get_partition_writer_command(&mut self, topic_name: String) -> BrokerResponse {
         let partition_writer_name = format!("{}-writer", topic_name);
         if let Some(partition_writer) = self.partition_managers.get(&partition_writer_name) {
             tracing::info!("Found partition writer for topic: {}", topic_name);
@@ -113,31 +121,31 @@ impl Broker {
         _num_partitions: u8,
         _retention_period_hours: u16,
     ) -> BrokerResponse {
-        if self.topics_in_cluster.contains(&topic_name) && self.partition_managers.contains_key(&topic_name) {
+        let partition_writer_name = format!("{}-writer", topic_name);
+        if self.topics_in_cluster.contains(&topic_name) && self.partition_managers.contains_key(&partition_writer_name)
+        {
             tracing::info!("Topic already exists: {}", topic_name);
             return BrokerResponse::TopicAlreadyExists;
         } else {
             tracing::info!("Creating a partition writer for new topic: {}", topic_name);
-            let (partition_writer_tx, partition_writer_rx) = mpsc::channel::<PartitionCommand>(100);
+            let (partition_writer_tx, partition_writer_rx) =
+                mpsc::channel::<PartitionCommand>(self.mpsc_max_queue_size);
 
             let partition_cancellation_token = self.cancellation_token.child_token();
-            let topic_name_clone = topic_name.clone();
             let partition_number = 0;
-            let partition_data_path = format!("{}/{}/{}", self.base_path_for_data, topic_name_clone, partition_number);
+            let mut partition_writer =
+                PartitionWriter::new(topic_name.clone(), partition_number, self.base_path_for_data.clone());
             tokio::spawn(async move {
-                let mut partition_writer =
-                    PartitionWriter::new(topic_name_clone, partition_number, partition_data_path);
                 partition_writer
                     .start(partition_writer_rx, partition_cancellation_token)
                     .await;
             });
             self.topics_in_cluster.push(topic_name.clone());
-            let partition_writer_name = format!("{}-writer", topic_name);
             self.partition_managers
                 .insert(partition_writer_name, partition_writer_tx);
-            tracing::info!("Partition writer created for topic {}", topic_name);
+            tracing::info!("Partition writer created for topic {}", &topic_name);
             tracing::info!(
-                "Total number of registered partition writers in this broker are: {}",
+                "Total number of registered partition managers in this broker: {}",
                 self.partition_managers.len()
             );
             BrokerResponse::TopicCreated {
@@ -163,6 +171,7 @@ mod should {
             "local:1234".to_string(),
             cancellation_token.clone(),
             "/tmp/walrs/test/".to_string(),
+            3,
         );
         let (_, main_rx) = mpsc::channel::<BrokerCommand>(2);
 

@@ -6,20 +6,20 @@ use crate::models::{PartitionCommand, PartitionReaderResponse, PartitionWriterRe
 use tokio::io::AsyncBufReadExt;
 
 pub struct PartitionWriter {
-    base_path: String,
     partition_name: String,
+    partition_path: String,
 }
 
 impl PartitionWriter {
     pub fn new(topic: String, partition_number: u8, base_path: String) -> Self {
         let partition_name = format!("{}-{}", topic, partition_number);
-
-        std::fs::create_dir_all(&base_path)
+        let partition_path = format!("{}/{}/{}", base_path, topic, partition_number);
+        std::fs::create_dir_all(&partition_path)
             .expect(format!("Failed to create partition directory: {}", partition_name).as_str());
 
         PartitionWriter {
-            base_path,
             partition_name,
+            partition_path,
         }
     }
 
@@ -28,15 +28,15 @@ impl PartitionWriter {
         mut main_rx: mpsc::Receiver<PartitionCommand>,
         cancellation_token: CancellationToken,
     ) {
-        tracing::info!("Starting partition manager for partition {}", self.partition_name);
+        tracing::info!("Starting partition writer for partition {}", self.partition_name);
 
-        let partition_path = format!("{}/data.log", self.base_path);
-        tracing::info!("Partition data will be stored at {}", partition_path);
+        let partition_file_path = format!("{}/data.log", self.partition_path);
+        tracing::info!("Partition data will be stored in {}", partition_file_path);
 
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(partition_path)
+            .open(partition_file_path)
             .await
             .expect(format!("Failed to open partition file for partition: {}", self.partition_name).as_str());
 
@@ -50,6 +50,7 @@ impl PartitionWriter {
                                 file.write_all(&message.payload).await.expect("Failed to write message to partition");
                                 file.write_all(b"\n").await.expect("Failed to write newline to partition");
                             }
+                            tracing::debug!("Wrote {} messages to partition {}", message_count, self.partition_name);
                             let _ = tx.send(PartitionWriterResponse::MessagesPersisted { count: message_count });
                         }
                         _ => {

@@ -28,8 +28,8 @@ pub async fn handle_producer_request(
             match broker_rx.await {
                 Ok(response) => match response {
                     BrokerResponse::PartitionManagerFound { tx } => {
-                        tracing::info!("Partition manager found.");
-                        return send_messages_to_partition_manager(message_batch.messages, tx).await;
+                        tracing::info!("Partition writer found.");
+                        return send_messages_to_partition_writer(message_batch.messages, tx).await;
                     }
                     _ => response.to_cluster_response(),
                 },
@@ -44,7 +44,7 @@ pub async fn handle_producer_request(
     }
 }
 
-async fn send_messages_to_partition_manager(
+async fn send_messages_to_partition_writer(
     messages_to_persist: Vec<Message>,
     partition_manager_sender: mpsc::Sender<PartitionCommand>,
 ) -> ClusterResponse {
