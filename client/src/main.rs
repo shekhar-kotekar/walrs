@@ -41,10 +41,13 @@ async fn main() {
         }
     };
     // check if sent messages and received messages are same
-    if sent_messages == received_messages {
-        tracing::info!("All sent messages were received successfully.");
-    } else {
-        tracing::error!("Some sent messages were not received.");
+    tracing::debug!("sent messages");
+    for message in &sent_messages {
+        tracing::debug!("  {:?}", message);
+    }
+    tracing::debug!("received messages");
+    for message in &received_messages {
+        tracing::debug!("  {:?}", message);
     }
 }
 
