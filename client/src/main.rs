@@ -7,7 +7,7 @@ use common::{
 
 #[tokio::main]
 async fn main() {
-    common::enable_tracing();
+    common::init_tracing();
     let admin = ClusterAdmin {
         brokers: vec!["127.0.0.1:5056".into(), "broker2:9092".into()],
     };
