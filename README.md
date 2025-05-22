@@ -1,4 +1,4 @@
-# WAL-rs
+# WAL-rs &nbsp;&nbsp;&nbsp;<img src="walrus.svg" alt="Agni" width="32" height="32">
 
 Highly opinionated attempt to implement Apache Kafka in Rust.
 
