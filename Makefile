@@ -5,10 +5,10 @@ k8s_context := kind-kind
 IMAGE_REGISTRY := localhost:5001
 export GIT_COMMIT := $(shell git rev-parse --short HEAD)
 
-.PHONY: run set_kind_context dockerize deploy teardown replace_environment_variables
+.PHONY: run_server set_kind_context dockerize deploy teardown replace_environment_variables dev-setup
 
-run:
-	cargo run
+run_server:
+	RUSTFLAGS='--cfg tokio_unstable' cargo run --bin walrs_server -- --config $(CONFIG_FILE_PATH)
 
 prepare:
 	@if [ -z "$(PACKAGE)" ]; then \
@@ -79,3 +79,6 @@ teardown: set_kind_context
 
 	@echo "INFO: Deleted successfully!"
 	kubectl get namespaces
+
+dev-setup:
+	@cargo install --locked tokio-console
