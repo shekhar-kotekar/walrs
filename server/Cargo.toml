@@ -8,6 +8,7 @@ name = "walrs_server"
 path = "src/main.rs"
 
 [dependencies]
+console-subscriber = "0.4.1"
 common = { path = "../common" }
 uuid = { version = "1.11.0", features = ["v4", "serde"] }
 serde = { version = "1.0.216", features = ["derive"] }
@@ -24,4 +25,3 @@ tracing-appender = "0.2.3"
 [dev-dependencies]
 tracing-test = "0.2.5"
 tempdir = "0.3.7"
-console-subscriber = "0.4.1"
