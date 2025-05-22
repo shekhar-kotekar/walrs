@@ -27,6 +27,28 @@ In this process we are aiming to learn distributed systems, some algorithms, per
 
 ## Getting Started
 
+Execute `make dev-setup` target which will install necessary tools like tokio-console, etc.
+
+### Run in local
+
+In one console execute below to run one walrs server in local
+
+```
+export POD_IP=127.0.0.1
+make run_server
+```
+
+Open another console and execute `cargo run -p client` to run test client which does following:
+
+1. Connect to locally running walrs server
+2. Try to create a new topic
+3. Send 2 dummy messages
+4. Receive first batch of messages from the walrs server
+
+(Optional) If you want to view Tokio task details then in another console execute `tokio-console` command.
+
+### Deployment in local k8s
+
 Execute `make deploy` to deploy server in local kind cluster.
 
 Execute `make deploy FAST=true` to deploy server in local kind cluster without building Docker image.
