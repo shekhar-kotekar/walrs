@@ -16,6 +16,7 @@ use request_handlers::{
     producer::handle_producer_request,
 };
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
+use tracing_subscriber::prelude::*;
 
 mod broker;
 mod models;
@@ -33,7 +34,14 @@ const BASE_PATH_FOR_DATA: &str = "/tmp/walrs/data";
 // Topic names are case sensitive.
 #[tokio::main]
 async fn main() {
-    common::enable_tracing();
+    // common::init_tracing();
+    // #[cfg(all(debug_assertions, feature = "console"))]
+    // {
+    //     console_subscriber::init();
+    //     tracing::warn!("Console subscriber initialized.");
+    // }
+    init_tracing_with_console();
+
     let pod_ip: String = std::env::var("POD_IP").expect("POD_IP environment variable not set.");
     let address = format!("{}:{}", pod_ip, WALRS_PORT);
 
@@ -159,6 +167,24 @@ async fn process_client_request(
             tracing::info!("Client request processing completed.");
         }
     }
+}
+
+fn init_tracing_with_console() {
+    let console_layer = console_subscriber::spawn();
+
+    let tracing_layer = tracing_subscriber::fmt::layer()
+        .with_target(false)
+        .with_filter(if cfg!(debug_assertions) {
+            tracing_subscriber::filter::LevelFilter::DEBUG
+        } else {
+            tracing_subscriber::filter::LevelFilter::INFO
+        });
+
+    tracing_subscriber::registry()
+        .with(console_layer)
+        .with(tracing_layer)
+        .init();
+    tracing::info!("Console and tracing subscriber initialized.");
 }
 
 // Main will be responsible for external facing communication like producer or consumer requests.

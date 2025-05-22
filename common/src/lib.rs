@@ -8,7 +8,7 @@ pub mod message_batch;
 pub mod models;
 pub mod producer;
 
-pub fn enable_tracing() {
+pub fn init_tracing() {
     // let file_appender = tracing_appender::rolling::daily("/tmp/kraft-rs/logs/", "kraft-rs.log");
     // let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
