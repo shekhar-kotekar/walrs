@@ -11,16 +11,10 @@ pub async fn handle_admin_request(socket: &mut TcpStream, broker_tx: mpsc::Sende
     let next_command = commons::read_client_command(socket).await;
     match next_command {
         Some(command) => match command {
-            ClientCommand::CreateTopic {
-                topic_name,
-                num_partitions,
-                retention_period_hours,
-            } => {
+            ClientCommand::CreateTopic { topic_details } => {
                 let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerResponse>();
                 let broker_command: BrokerCommand = BrokerCommand::CreateNewTopic {
-                    topic_name,
-                    num_partitions,
-                    retention_period_hours,
+                    topic: topic_details,
                     broker_tx: broker_oneshot_tx,
                 };
                 broker_tx.send(broker_command).await.unwrap();

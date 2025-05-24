@@ -1,0 +1,5 @@
+ip: "0.0.0.0"
+port: 5055
+heartbeat_interval: 10
+mpsc_max_queue_size: 100
+base_path_for_data: "/tmp/walrs/data/"

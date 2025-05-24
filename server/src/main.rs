@@ -1,6 +1,8 @@
-use broker::Broker;
+use std::collections::HashMap;
+
+use broker::{Broker, ClusterInfo};
 use common::models::{ClientCommand, ClientType, ClusterResponse};
-use models::BrokerCommand;
+use models::{BrokerCommand, BrokerConfig, BrokerConfigBuilder};
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
@@ -21,46 +23,52 @@ use tracing_subscriber::prelude::*;
 mod broker;
 mod models;
 mod partition;
+mod peer;
 mod request_handlers;
 
 // TODO: Read all the constants from a config file
-const WALRS_PORT: u16 = 5056;
-// const NODE_MANAGER_PORT: u16 = 5055;
+// const WALRS_PORT: u16 = 5056;
+const PEER_LISTENER_PORT: u16 = 5057;
 const MPSC_MAX_Q_SIZE: usize = 100;
-// const SLEEP_TIME_IN_SECONDS: u64 = 5;
 // const K8S_SERVICE_NAME: &str = "walrs-headless-service.walrs.svc.cluster.local";
 const BASE_PATH_FOR_DATA: &str = "/tmp/walrs/data";
 
 // Topic names are case sensitive.
 #[tokio::main]
 async fn main() {
-    // common::init_tracing();
     // #[cfg(all(debug_assertions, feature = "console"))]
     // {
     //     console_subscriber::init();
     //     tracing::warn!("Console subscriber initialized.");
     // }
     init_tracing_with_console();
-
     let pod_ip: String = std::env::var("POD_IP").expect("POD_IP environment variable not set.");
-    let address = format!("{}:{}", pod_ip, WALRS_PORT);
 
     let task_tracker = TaskTracker::new();
     let cancellation_token = CancellationToken::new();
 
+    let cluster_info = ClusterInfo {
+        brokers: HashMap::new(),
+        topics_in_cluster: vec![],
+    };
+
+    let broker_config = get_broker_config(&pod_ip);
+    let broker_port = broker_config.port;
     let broker_cancellation_token = cancellation_token.child_token();
-    let mut broker = Broker::new(
-        address.clone(),
-        broker_cancellation_token,
-        BASE_PATH_FOR_DATA.to_string(),
-        MPSC_MAX_Q_SIZE,
-    );
+    let mut broker = Broker::new(broker_config, broker_cancellation_token, cluster_info);
 
     let (main_tx, main_rx) = mpsc::channel::<BrokerCommand>(MPSC_MAX_Q_SIZE);
-
     task_tracker.spawn(async move { broker.start(main_rx).await });
 
-    let main_tcp_listener = TcpListener::bind(address).await.unwrap();
+    let peer_listener_cancellation_token = cancellation_token.child_token();
+    let broker_tx = main_tx.clone();
+    let peer_listener_address = format!("{}:{}", &pod_ip, PEER_LISTENER_PORT);
+    task_tracker.spawn(async move {
+        peer::start_peer_listener(peer_listener_address, broker_tx, peer_listener_cancellation_token).await
+    });
+
+    let broker_address = format!("{}:{}", &pod_ip, broker_port);
+    let main_tcp_listener = TcpListener::bind(broker_address).await.unwrap();
     tracing::debug!("Listening on: {}", main_tcp_listener.local_addr().unwrap());
 
     let mut sigterm: Signal = signal(SignalKind::terminate()).expect("Failed to create signal handler");
@@ -99,6 +107,18 @@ async fn main() {
         }
     }
     tracing::info!("Exiting main.");
+}
+
+fn get_broker_config(pod_ip: &str) -> BrokerConfig {
+    let config_file_path =
+        std::env::var("BROKER_CONFIG_FILE").unwrap_or_else(|_| "./configs/broker_conf.yml".to_string());
+
+    let builder = BrokerConfigBuilder::from_yaml_file(&config_file_path)
+        .expect("Failed to read broker config from YAML file")
+        .ip(pod_ip.to_string())
+        .base_path_for_data(BASE_PATH_FOR_DATA.to_string())
+        .mpsc_max_queue_size(MPSC_MAX_Q_SIZE);
+    builder.build()
 }
 
 async fn validate_client_request_to_connect(client_type: &ClientType, socket: &mut TcpStream) {
@@ -174,6 +194,7 @@ fn init_tracing_with_console() {
 
     let tracing_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
+        .with_thread_ids(true)
         .with_filter(if cfg!(debug_assertions) {
             tracing_subscriber::filter::LevelFilter::DEBUG
         } else {

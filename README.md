@@ -71,6 +71,20 @@ Example:
 cargo test node_manager -- --nocapture
 ```
 
+## Topic creation process
+
+A client can send a topic creation request to any broker in the cluster, all the brokers are equal. Whenever broker receives a request to create a new topic, it will first check if topic already exists in the clsuter or not. Each broker sends it's own metadata to other brokers as a `heartbeat` signal and receives the same information from other brokers. Topic names are case sensitve so MyTopic is NOT same as Mytopic and both can co-exist in the cluster.
+
+Each topic in the cluster has one `lead broker`. After checking existance of a topic, broker will check its cluster metadata to find a broker with minimum number of topics it owns.
+After selecting the lead broker (lead broker can be the same broker which received the request in the first place), broker will do the following:
+
+- Find potential follower brokers by checking how many partitions that broker is serving
+- Create directory and other metadata for the topic in its local system and spawn `lead partition writer` Tokio task
+- Send request to `follower brokers` to create `follower partition writer` task
+- `follower brokers` can respond with either `follower created` status or `Error` status with some message string
+- If all the `follower brokers` send `follower created` status then `lead broker` will send `TopicCreated` message to client
+- In any of the `follower brokers` responds with `Error` or due to any other reason topic creation fails then leader will respond with `Error` status to the client.
+
 ## Producers
 
 ## Consumers

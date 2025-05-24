@@ -8,7 +8,7 @@ export GIT_COMMIT := $(shell git rev-parse --short HEAD)
 .PHONY: run_server set_kind_context dockerize deploy teardown replace_environment_variables dev-setup
 
 run_server:
-	RUSTFLAGS='--cfg tokio_unstable' cargo run --bin walrs_server -- --config $(CONFIG_FILE_PATH)
+	RUSTFLAGS='--cfg tokio_unstable' cargo run --bin walrs_server
 
 prepare:
 	@if [ -z "$(PACKAGE)" ]; then \
