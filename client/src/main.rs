@@ -1,7 +1,7 @@
 use common::{
     admin::ClusterAdmin,
     consumer::Consumer,
-    models::{ClientCommand, ClusterResponse, Message},
+    models::{AckLevel, ClientCommand, ClusterResponse, Message, Topic},
     producer::Producer,
 };
 
@@ -12,10 +12,9 @@ async fn main() {
         brokers: vec!["127.0.0.1:5056".into(), "broker2:9092".into()],
     };
     let topic_name: &str = "my_new_topic";
+
     let command = ClientCommand::CreateTopic {
-        topic_name: topic_name.into(),
-        num_partitions: 3,
-        retention_period_hours: 48,
+        topic_details: Topic::new(topic_name.to_string(), Some(3), Some(48), Some(AckLevel::Leader)),
     };
     let first_message = Message {
         payload: "first_message".as_bytes().to_vec(),

@@ -73,9 +73,9 @@ impl PartitionWriter {
 
 pub struct PartitionReader {
     topic_name: String,
-    pub message_batch_size: u8,
-    pub partition_name: String,
-    pub partition_path: String,
+    message_batch_size: u8,
+    partition_name: String,
+    partition_path: String,
 }
 
 impl PartitionReader {
@@ -119,9 +119,9 @@ impl PartitionReader {
         cancellation_token: CancellationToken,
     ) {
         tracing::info!("Starting partition reader for partition {}", self.partition_name);
-        tracing::info!("Partition data will be read from {}", self.partition_path);
 
         let log_file_name = format!("{}/data.log", self.partition_path);
+        tracing::info!("Partition data will be read from {}", log_file_name);
         let file = OpenOptions::new()
             .read(true)
             .open(&log_file_name)
@@ -150,6 +150,7 @@ impl PartitionReader {
                         }
                     }
                 }
+
                 _ = cancellation_token.cancelled() => {
                     tracing::info!("Cancellation token called. Partition reader shutting down: {}", self.partition_name);
                     let _ = reader.shutdown().await;
