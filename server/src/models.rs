@@ -1,6 +1,5 @@
 use common::models::{ClusterResponse, Message, Topic};
 use serde::{Deserialize, Serialize};
-use serde_yml::modules::path;
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug)]
@@ -56,42 +55,42 @@ impl Heartbeat {
     }
 }
 
-pub enum BrokerCommand {
+pub enum MainToBrokerCommand {
     CreateNewTopic {
         topic: Topic,
-        broker_tx: oneshot::Sender<BrokerResponse>,
+        broker_tx: oneshot::Sender<BrokerToMainResponse>,
     },
     GetPartitionWriter {
         topic_name: String,
-        broker_tx: oneshot::Sender<BrokerResponse>,
+        broker_tx: oneshot::Sender<BrokerToMainResponse>,
     },
     GetPartitionReader {
         topic_name: String,
-        broker_tx: oneshot::Sender<BrokerResponse>,
+        broker_tx: oneshot::Sender<BrokerToMainResponse>,
     },
     Heartbeat {
         sender_address: String,
         message: Heartbeat,
-        broker_tx: oneshot::Sender<BrokerResponse>,
+        broker_tx: oneshot::Sender<BrokerToMainResponse>,
     },
 }
 
-pub enum BrokerResponse {
+pub enum BrokerToMainResponse {
     TopicCreated { leader_address: String },
-    TopicAlreadyExists { leader_address: String },
+    TopicAlreadyExists,
     PartitionNotFound,
     PartitionManagerFound { tx: mpsc::Sender<PartitionCommand> },
     TopicNotFound,
     HeartbeatReceived,
 }
 
-impl BrokerResponse {
+impl BrokerToMainResponse {
     pub fn to_cluster_response(&self) -> ClusterResponse {
         match self {
-            BrokerResponse::TopicCreated { leader_address } => ClusterResponse::TopicCreated {
+            BrokerToMainResponse::TopicCreated { leader_address } => ClusterResponse::TopicCreated {
                 leader_address: leader_address.clone(),
             },
-            BrokerResponse::TopicAlreadyExists { leader_address } => ClusterResponse::TopicAlreadyExists,
+            BrokerToMainResponse::TopicAlreadyExists => ClusterResponse::TopicAlreadyExists,
             _ => ClusterResponse::InternalError {
                 message: "Unknown broker response".to_string(),
             },
@@ -135,15 +134,15 @@ impl BrokerConfigBuilder {
         self
     }
 
-    pub fn port(mut self, port: u16) -> Self {
-        self.port = port;
-        self
-    }
+    // pub fn port(mut self, port: u16) -> Self {
+    //     self.port = port;
+    //     self
+    // }
 
-    pub fn heartbeat_interval(mut self, interval: u8) -> Self {
-        self.heartbeat_interval = interval;
-        self
-    }
+    // pub fn heartbeat_interval(mut self, interval: u8) -> Self {
+    //     self.heartbeat_interval = interval;
+    //     self
+    // }
 
     pub fn mpsc_max_queue_size(mut self, size: usize) -> Self {
         self.mpsc_max_queue_size = size;

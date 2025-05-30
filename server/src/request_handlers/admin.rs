@@ -2,18 +2,21 @@ use common::models::{ClientCommand, ClusterResponse};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::models::{BrokerCommand, BrokerResponse};
+use crate::models::{BrokerToMainResponse, MainToBrokerCommand};
 use crate::request_handlers::commons;
 
-pub async fn handle_admin_request(socket: &mut TcpStream, broker_tx: mpsc::Sender<BrokerCommand>) -> ClusterResponse {
+pub async fn handle_admin_request(
+    socket: &mut TcpStream,
+    broker_tx: mpsc::Sender<MainToBrokerCommand>,
+) -> ClusterResponse {
     tracing::debug!("Handling admin request from: {}", socket.peer_addr().unwrap());
 
     let next_command = commons::read_client_command(socket).await;
     match next_command {
         Some(command) => match command {
             ClientCommand::CreateTopic { topic_details } => {
-                let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerResponse>();
-                let broker_command: BrokerCommand = BrokerCommand::CreateNewTopic {
+                let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerToMainResponse>();
+                let broker_command: MainToBrokerCommand = MainToBrokerCommand::CreateNewTopic {
                     topic: topic_details,
                     broker_tx: broker_oneshot_tx,
                 };

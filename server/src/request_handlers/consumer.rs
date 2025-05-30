@@ -1,14 +1,17 @@
 use common::consumer::ConsumerResponse;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::models::{BrokerCommand, BrokerResponse, PartitionCommand, PartitionReaderResponse};
+use crate::models::{BrokerToMainResponse, MainToBrokerCommand, PartitionCommand, PartitionReaderResponse};
 
-pub async fn handle_consumer_request(topic_name: &String, broker_tx: mpsc::Sender<BrokerCommand>) -> ConsumerResponse {
+pub async fn handle_consumer_request(
+    topic_name: &String,
+    broker_tx: mpsc::Sender<MainToBrokerCommand>,
+) -> ConsumerResponse {
     tracing::info!("Consumer client connected.");
 
-    let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerResponse>();
+    let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerToMainResponse>();
 
-    let find_partition_reader_command: BrokerCommand = BrokerCommand::GetPartitionReader {
+    let find_partition_reader_command: MainToBrokerCommand = MainToBrokerCommand::GetPartitionReader {
         topic_name: topic_name.to_string(),
         broker_tx: broker_oneshot_tx,
     };
@@ -16,7 +19,7 @@ pub async fn handle_consumer_request(topic_name: &String, broker_tx: mpsc::Sende
 
     match broker_rx.await {
         Ok(response) => match response {
-            BrokerResponse::PartitionManagerFound { tx } => {
+            BrokerToMainResponse::PartitionManagerFound { tx } => {
                 let (partition_tx, partition_rx) = oneshot::channel::<PartitionReaderResponse>();
                 let partition_reader_command = PartitionCommand::ReadMessages {
                     topic_name: topic_name.to_string(),

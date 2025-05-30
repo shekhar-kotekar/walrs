@@ -5,7 +5,7 @@ use tokio::{io::AsyncWriteExt, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    models::{BrokerCommand, BrokerConfig, BrokerResponse, Heartbeat, PartitionCommand},
+    models::{BrokerConfig, BrokerToMainResponse, Heartbeat, MainToBrokerCommand, PartitionCommand},
     partition::{PartitionReader, PartitionWriter},
 };
 
@@ -13,7 +13,6 @@ const MAX_MESSAGE_BATCH_SIZE: u8 = 3;
 
 #[derive(Debug, Clone)]
 pub struct BrokerInfo {
-    address: String,
     partition_leaders: Vec<String>,
 }
 
@@ -59,28 +58,28 @@ impl Broker {
         }
     }
 
-    pub async fn start(&mut self, mut main_rx: mpsc::Receiver<BrokerCommand>) {
+    pub async fn start(&mut self, mut main_rx: mpsc::Receiver<MainToBrokerCommand>) {
         tracing::info!("{} broker started...", self.address);
 
         loop {
             tokio::select! {
                 Some(command) = main_rx.recv() => {
                     match command {
-                        BrokerCommand::CreateNewTopic { topic, broker_tx } => {
+                        MainToBrokerCommand::CreateNewTopic { topic, broker_tx } => {
                             let response = self.handle_create_topic_command(topic).await;
                             let _ = broker_tx.send(response);
                         }
-                        BrokerCommand::GetPartitionWriter { topic_name, broker_tx } => {
+                        MainToBrokerCommand::GetPartitionWriter { topic_name, broker_tx } => {
                             let response = self.handle_get_partition_writer_command(topic_name).await;
                             let _ = broker_tx.send(response);
                         }
-                        BrokerCommand::GetPartitionReader { topic_name, broker_tx } => {
+                        MainToBrokerCommand::GetPartitionReader { topic_name, broker_tx } => {
                             let response = self.handle_get_partition_reader_command(topic_name).await;
                             let _ = broker_tx.send(response);
                         }
-                        BrokerCommand::Heartbeat {sender_address, message, broker_tx } => {
+                        MainToBrokerCommand::Heartbeat {sender_address, message, broker_tx } => {
                             tracing::info!("{} received heartbeat from peer: {} :: {:?}", self.address, sender_address, message);
-                            let _ = broker_tx.send(BrokerResponse::HeartbeatReceived);
+                            let _ = broker_tx.send(BrokerToMainResponse::HeartbeatReceived);
                         }
                     }
                 }
@@ -118,11 +117,11 @@ impl Broker {
         }
     }
 
-    async fn handle_get_partition_reader_command(&mut self, topic_name: String) -> BrokerResponse {
+    async fn handle_get_partition_reader_command(&mut self, topic_name: String) -> BrokerToMainResponse {
         let partition_reader_name = format!("{}-reader", topic_name);
         if let Some(partition_reader_tx) = self.partition_managers.get(&partition_reader_name) {
             tracing::info!("Found partition reader for topic: {}", topic_name);
-            BrokerResponse::PartitionManagerFound {
+            BrokerToMainResponse::PartitionManagerFound {
                 tx: partition_reader_tx.clone(),
             }
         } else {
@@ -145,22 +144,22 @@ impl Broker {
             let partition_reader_name = format!("{}-reader", topic_name);
             self.partition_managers
                 .insert(partition_reader_name, partition_reader_tx.clone());
-            BrokerResponse::PartitionManagerFound {
+            BrokerToMainResponse::PartitionManagerFound {
                 tx: partition_reader_tx,
             }
         }
     }
 
-    async fn handle_get_partition_writer_command(&mut self, topic_name: String) -> BrokerResponse {
+    async fn handle_get_partition_writer_command(&mut self, topic_name: String) -> BrokerToMainResponse {
         let partition_writer_name = format!("{}-writer", topic_name);
         if let Some(partition_writer) = self.partition_managers.get(&partition_writer_name) {
             tracing::info!("Found partition writer for topic: {}", topic_name);
-            BrokerResponse::PartitionManagerFound {
+            BrokerToMainResponse::PartitionManagerFound {
                 tx: partition_writer.clone(),
             }
         } else {
             tracing::info!("No partition writer found for topic: {}", topic_name);
-            BrokerResponse::PartitionNotFound
+            BrokerToMainResponse::PartitionNotFound
         }
     }
 
@@ -171,45 +170,25 @@ impl Broker {
             .find(|broker| broker.partition_leaders.contains(topic_name))
     }
 
-    async fn can_create_new_topic(&self, topic_name: &String) -> BrokerResponse {
+    async fn can_create_new_topic(&self, topic_name: &String) -> BrokerToMainResponse {
         let partition_writer_name = format!("{}-writer", topic_name);
         match self.partition_managers.get(&partition_writer_name) {
             Some(_) => {
-                return BrokerResponse::TopicAlreadyExists {
-                    leader_address: self.address.clone(),
-                };
+                return BrokerToMainResponse::TopicAlreadyExists;
             }
             None => {
                 tracing::info!("{} topic not found on this node. Checking in the cluster", topic_name);
                 match self.search_topic_in_cluster(topic_name) {
-                    Some(broker) => BrokerResponse::TopicAlreadyExists {
-                        leader_address: broker.address.clone(),
-                    },
-                    None => BrokerResponse::TopicNotFound,
+                    Some(_) => BrokerToMainResponse::TopicAlreadyExists,
+                    None => BrokerToMainResponse::TopicNotFound,
                 }
             }
         }
     }
 
-    fn find_potential_followers(&self) -> Vec<String> {
-        // Find all brokers in the cluster except this one AND the one which has less number of partition leaders than the current one
-        let self_partition_leaders = self
-            .partition_managers
-            .iter()
-            .filter(|(topic_name, _)| topic_name.ends_with("-writer"))
-            .count();
-
-        self.cluster_info
-            .brokers
-            .values()
-            .filter(|broker| broker.address != self.address && broker.partition_leaders.len() > self_partition_leaders)
-            .map(|broker| broker.address.clone())
-            .collect()
-    }
-
-    async fn handle_create_topic_command(&mut self, topic: Topic) -> BrokerResponse {
+    async fn handle_create_topic_command(&mut self, topic: Topic) -> BrokerToMainResponse {
         let topic_exists = self.can_create_new_topic(&topic.name).await;
-        if let BrokerResponse::TopicAlreadyExists { .. } = topic_exists {
+        if let BrokerToMainResponse::TopicAlreadyExists { .. } = topic_exists {
             return topic_exists;
         } else {
             tracing::info!("Creating a partition writer for new topic: {}", topic.name);
@@ -234,7 +213,7 @@ impl Broker {
                 "Total number of registered partition managers in this broker: {}",
                 self.partition_managers.len()
             );
-            BrokerResponse::TopicCreated {
+            BrokerToMainResponse::TopicCreated {
                 leader_address: "127.0.0.1:5056".into(),
             }
         }
@@ -248,7 +227,7 @@ mod should {
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
 
-    use crate::models::BrokerCommand;
+    use crate::models::MainToBrokerCommand;
 
     use super::Broker;
 
@@ -267,7 +246,7 @@ mod should {
             base_path_for_data: "/tmp/walrs/data".to_string(),
         };
         let mut broker = Broker::new(broker_config, cancellation_token.clone(), cluster_info);
-        let (_, main_rx) = mpsc::channel::<BrokerCommand>(2);
+        let (_, main_rx) = mpsc::channel::<MainToBrokerCommand>(2);
 
         tokio::spawn(async move { broker.start(main_rx).await });
 

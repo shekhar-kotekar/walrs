@@ -6,28 +6,28 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::bytes::BytesMut;
 use tokio_util::codec::Decoder;
 
-use crate::models::{BrokerCommand, BrokerResponse, PartitionCommand, PartitionWriterResponse};
+use crate::models::{BrokerToMainResponse, MainToBrokerCommand, PartitionCommand, PartitionWriterResponse};
 
 pub async fn handle_producer_request(
     socket: &mut TcpStream,
-    broker_tx: mpsc::Sender<BrokerCommand>,
+    broker_tx: mpsc::Sender<MainToBrokerCommand>,
 ) -> ClusterResponse {
     tracing::info!("Producer connected.");
-    let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerResponse>();
+    let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerToMainResponse>();
     let mut message_batch_codec = MessageBatchCodec;
 
     match read_messages_from_socket(socket, &mut message_batch_codec).await {
         Some(message_batch) => {
             let message_count = message_batch.messages.len();
             tracing::info!("Received {} messages for {}", message_count, message_batch.topic_name);
-            let find_partition_manager_command: BrokerCommand = BrokerCommand::GetPartitionWriter {
+            let find_partition_manager_command: MainToBrokerCommand = MainToBrokerCommand::GetPartitionWriter {
                 topic_name: message_batch.topic_name,
                 broker_tx: broker_oneshot_tx,
             };
             broker_tx.send(find_partition_manager_command).await.unwrap();
             match broker_rx.await {
                 Ok(response) => match response {
-                    BrokerResponse::PartitionManagerFound { tx } => {
+                    BrokerToMainResponse::PartitionManagerFound { tx } => {
                         tracing::info!("Partition writer found.");
                         return send_messages_to_partition_writer(message_batch.messages, tx).await;
                     }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use broker::{Broker, ClusterInfo};
 use common::models::{ClientCommand, ClientType, ClusterResponse};
-use models::{BrokerCommand, BrokerConfig, BrokerConfigBuilder};
+use models::{MainToBrokerCommand, BrokerConfig, BrokerConfigBuilder};
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
@@ -57,7 +57,7 @@ async fn main() {
     let broker_cancellation_token = cancellation_token.child_token();
     let mut broker = Broker::new(broker_config, broker_cancellation_token, cluster_info);
 
-    let (main_tx, main_rx) = mpsc::channel::<BrokerCommand>(MPSC_MAX_Q_SIZE);
+    let (main_tx, main_rx) = mpsc::channel::<MainToBrokerCommand>(MPSC_MAX_Q_SIZE);
     task_tracker.spawn(async move { broker.start(main_rx).await });
 
     let peer_listener_cancellation_token = cancellation_token.child_token();
@@ -132,7 +132,7 @@ async fn validate_client_request_to_connect(client_type: &ClientType, socket: &m
 
 async fn process_client_request(
     mut socket: TcpStream,
-    broker_tx: mpsc::Sender<BrokerCommand>,
+    broker_tx: mpsc::Sender<MainToBrokerCommand>,
     cancellation_token: CancellationToken,
 ) {
     tracing::debug!("Processing request from: {}", socket.peer_addr().unwrap());

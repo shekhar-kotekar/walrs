@@ -1,4 +1,4 @@
-use crate::models::{BrokerCommand, BrokerResponse, Heartbeat};
+use crate::models::{BrokerToMainResponse, Heartbeat, MainToBrokerCommand};
 use common::models::ClusterResponse;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 pub async fn start_peer_listener(
     address: String,
-    broker_tx: mpsc::Sender<BrokerCommand>,
+    broker_tx: mpsc::Sender<MainToBrokerCommand>,
     cancellation_token: CancellationToken,
 ) {
     let peer_listener = tokio::net::TcpListener::bind(&address)
@@ -39,10 +39,10 @@ pub async fn start_peer_listener(
 async fn send_heartbeat_to_broker_task(
     heartbeat_sender_address: String,
     heartbeat: Heartbeat,
-    broker_tx: mpsc::Sender<BrokerCommand>,
-) -> Option<BrokerResponse> {
-    let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerResponse>();
-    let broker_command = BrokerCommand::Heartbeat {
+    broker_tx: mpsc::Sender<MainToBrokerCommand>,
+) -> Option<BrokerToMainResponse> {
+    let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerToMainResponse>();
+    let broker_command = MainToBrokerCommand::Heartbeat {
         sender_address: heartbeat_sender_address,
         message: heartbeat,
         broker_tx: broker_oneshot_tx,
@@ -59,7 +59,7 @@ async fn send_heartbeat_to_broker_task(
 
 async fn handle_peer_request(
     mut socket: TcpStream,
-    broker_tx: mpsc::Sender<BrokerCommand>,
+    broker_tx: mpsc::Sender<MainToBrokerCommand>,
     cancellation_token: CancellationToken,
 ) {
     tokio::select! {
@@ -75,7 +75,7 @@ async fn handle_peer_request(
                     let heartbeat_sender_address = socket.peer_addr().unwrap().to_string();
                     let broker_response = send_heartbeat_to_broker_task(heartbeat_sender_address, hb, broker_tx).await;
                     match broker_response {
-                        Some(BrokerResponse::HeartbeatReceived) => ClusterResponse::Success {
+                        Some(BrokerToMainResponse::HeartbeatReceived) => ClusterResponse::Success {
                             message: "Heartbeat received successfully".to_string(),
                         },
                         _ => ClusterResponse::InternalError {
