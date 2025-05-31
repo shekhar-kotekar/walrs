@@ -42,6 +42,8 @@ impl Decoder for BrokerResponseCodec {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use bytes::BytesMut;
     use tokio_util::codec::{Decoder, Encoder};
@@ -50,7 +52,7 @@ mod tests {
     fn test_broker_response_codec_encode_decode() {
         let mut codec = BrokerResponseCodec;
         let response = ClusterResponse::TopicCreated {
-            leader_address: "127.0.0.1:5056".to_string(),
+            partition_leaders: HashMap::from([(1, "127.0.0.1:5056".to_string())]),
         };
 
         // Encode the response

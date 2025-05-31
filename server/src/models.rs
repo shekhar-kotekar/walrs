@@ -1,6 +1,37 @@
+use std::collections::HashMap;
+
 use common::models::{ClusterResponse, Message, Topic};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum CommandToPeer {
+    CreatePartitionWriter {
+        topic_name: String,
+        partition_number: u8,
+        role: PartitionWriterRole,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum PeerResponse {
+    PartitionWriterCreated,
+    Error { message: String },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum PartitionWriterRole {
+    Leader,
+    Follower,
+}
+
+pub fn to_bytes<T: Serialize>(value: &T) -> Vec<u8> {
+    bincode::serialize(value).expect("Failed to serialize value")
+}
+
+pub fn from_bytes<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> T {
+    bincode::deserialize(bytes).expect("Failed to deserialize value")
+}
 
 #[derive(Debug)]
 pub enum PartitionWriterResponse {
@@ -28,14 +59,14 @@ pub enum PartitionCommand {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Heartbeat {
-    lead_partition_count: u8,
+    broker_status: BrokerInfo,
     timestamp: u64,
 }
 
 impl Heartbeat {
-    pub fn new(lead_partition_count: u8) -> Self {
+    pub fn new(broker_status: BrokerInfo) -> Self {
         Heartbeat {
-            lead_partition_count,
+            broker_status,
             timestamp: Self::current_timestamp(),
         }
     }
@@ -47,50 +78,74 @@ impl Heartbeat {
             .expect("Time went backwards")
             .as_millis() as u64
     }
-    pub fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(self).expect("Failed to serialize heartbeat")
-    }
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        bincode::deserialize(bytes).expect("Failed to deserialize heartbeat")
-    }
 }
 
-pub enum MainToBrokerCommand {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerInfo {
+    pub address: String,
+    pub partition_leaders: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClusterInfo {
+    pub brokers: HashMap<String, BrokerInfo>,
+    pub topics_in_cluster: Vec<String>,
+}
+
+pub enum CommandToBroker {
     CreateNewTopic {
         topic: Topic,
-        broker_tx: oneshot::Sender<BrokerToMainResponse>,
+        broker_tx: oneshot::Sender<BrokerResponse>,
+    },
+    CreatePartitionWriter {
+        topic_name: String,
+        partition_number: u8,
+        broker_tx: oneshot::Sender<BrokerResponse>,
+        role: PartitionWriterRole,
     },
     GetPartitionWriter {
         topic_name: String,
-        broker_tx: oneshot::Sender<BrokerToMainResponse>,
+        broker_tx: oneshot::Sender<BrokerResponse>,
     },
     GetPartitionReader {
         topic_name: String,
-        broker_tx: oneshot::Sender<BrokerToMainResponse>,
+        broker_tx: oneshot::Sender<BrokerResponse>,
     },
     Heartbeat {
         sender_address: String,
         message: Heartbeat,
-        broker_tx: oneshot::Sender<BrokerToMainResponse>,
+        broker_tx: oneshot::Sender<BrokerResponse>,
+    },
+    RegisterPeer {
+        peer_info: BrokerInfo,
+        broker_tx: oneshot::Sender<BrokerResponse>,
+    },
+    GetStatus {
+        broker_tx: oneshot::Sender<BrokerResponse>,
     },
 }
 
-pub enum BrokerToMainResponse {
-    TopicCreated { leader_address: String },
+#[derive(Debug)]
+pub enum BrokerResponse {
+    TopicCreated { partition_leaders: HashMap<u8, String> },
+    PartitionWriterCreated,
     TopicAlreadyExists,
     PartitionNotFound,
     PartitionManagerFound { tx: mpsc::Sender<PartitionCommand> },
     TopicNotFound,
     HeartbeatReceived,
+    BrokerError { message: String },
+    PeerRegistered,
+    Status { info: BrokerInfo },
 }
 
-impl BrokerToMainResponse {
+impl BrokerResponse {
     pub fn to_cluster_response(&self) -> ClusterResponse {
         match self {
-            BrokerToMainResponse::TopicCreated { leader_address } => ClusterResponse::TopicCreated {
-                leader_address: leader_address.clone(),
+            BrokerResponse::TopicCreated { partition_leaders } => ClusterResponse::TopicCreated {
+                partition_leaders: partition_leaders.clone(),
             },
-            BrokerToMainResponse::TopicAlreadyExists => ClusterResponse::TopicAlreadyExists,
+            BrokerResponse::TopicAlreadyExists => ClusterResponse::TopicAlreadyExists,
             _ => ClusterResponse::InternalError {
                 message: "Unknown broker response".to_string(),
             },
@@ -102,15 +157,15 @@ impl BrokerToMainResponse {
 pub struct BrokerConfig {
     pub ip: String,
     pub port: u16,
-    pub heartbeat_interval: u8,
-    pub mpsc_max_queue_size: usize,
+    pub heartbeat_interval_ms: u16,
+    pub mpsc_queue_size: usize,
     pub base_path_for_data: String,
 }
 
 pub struct BrokerConfigBuilder {
     ip: Option<String>,
     port: u16,
-    heartbeat_interval: u8,
+    heartbeat_interval: u16,
     mpsc_max_queue_size: usize,
     base_path_for_data: String,
 }
@@ -123,8 +178,8 @@ impl BrokerConfigBuilder {
         Ok(Self {
             ip: None,
             port: config.port,
-            heartbeat_interval: config.heartbeat_interval,
-            mpsc_max_queue_size: config.mpsc_max_queue_size,
+            heartbeat_interval: config.heartbeat_interval_ms,
+            mpsc_max_queue_size: config.mpsc_queue_size,
             base_path_for_data: config.base_path_for_data,
         })
     }
@@ -158,8 +213,8 @@ impl BrokerConfigBuilder {
         BrokerConfig {
             ip: self.ip.unwrap_or("0.0.0.0".to_string()),
             port: self.port,
-            heartbeat_interval: self.heartbeat_interval,
-            mpsc_max_queue_size: self.mpsc_max_queue_size,
+            heartbeat_interval_ms: self.heartbeat_interval,
+            mpsc_queue_size: self.mpsc_max_queue_size,
             base_path_for_data: self.base_path_for_data,
         }
     }
