@@ -1,14 +1,17 @@
 use common::consumer::ConsumerResponse;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::models::{BrokerCommand, BrokerResponse, PartitionCommand, PartitionReaderResponse};
+use crate::models::{BrokerResponse, CommandToBroker, PartitionCommand, PartitionReaderResponse};
 
-pub async fn handle_consumer_request(topic_name: &String, broker_tx: mpsc::Sender<BrokerCommand>) -> ConsumerResponse {
+pub async fn handle_consumer_request(
+    topic_name: &String,
+    broker_tx: mpsc::Sender<CommandToBroker>,
+) -> ConsumerResponse {
     tracing::info!("Consumer client connected.");
 
     let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerResponse>();
 
-    let find_partition_reader_command: BrokerCommand = BrokerCommand::GetPartitionReader {
+    let find_partition_reader_command: CommandToBroker = CommandToBroker::GetPartitionReader {
         topic_name: topic_name.to_string(),
         broker_tx: broker_oneshot_tx,
     };
@@ -27,7 +30,7 @@ pub async fn handle_consumer_request(topic_name: &String, broker_tx: mpsc::Sende
                     Ok(response) => match response {
                         PartitionReaderResponse::MessagesRead { messages } => {
                             tracing::debug!("Fetched {} messages from partition of {}", messages.len(), topic_name);
-                            ConsumerResponse::MessagesFetched { messages: messages }
+                            ConsumerResponse::MessagesFetched { messages }
                         }
                         PartitionReaderResponse::InternalError { message } => {
                             ConsumerResponse::InternalError { message }

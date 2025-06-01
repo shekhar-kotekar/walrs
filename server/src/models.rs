@@ -1,12 +1,47 @@
+use std::collections::HashMap;
+
 use common::models::{ClusterResponse, Message, Topic};
 use serde::{Deserialize, Serialize};
-use serde_yml::modules::path;
 use tokio::sync::{mpsc, oneshot};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum CommandToPeer {
+    CreatePartitionWriter {
+        topic_name: String,
+        partition_number: u8,
+        role: PartitionWriterRole,
+    },
+    Heartbeat {
+        peer_listener_address: String,
+        broker_status: BrokerInfo,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum PeerResponse {
+    PartitionWriterCreated,
+    HeartbeatReceived,
+    Error { message: String },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum PartitionWriterRole {
+    Leader,
+    Follower,
+}
+
+pub fn to_bytes<T: Serialize>(value: &T) -> Vec<u8> {
+    bincode::serialize(value).expect("Failed to serialize value")
+}
+
+pub fn from_bytes<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> T {
+    bincode::deserialize(bytes).expect("Failed to deserialize value")
+}
 
 #[derive(Debug)]
 pub enum PartitionWriterResponse {
     MessagesPersisted { count: u8 },
-    InternalError { message: String },
+    // InternalError { message: String },
 }
 
 #[derive(Debug)]
@@ -27,39 +62,28 @@ pub enum PartitionCommand {
     },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Heartbeat {
-    lead_partition_count: u8,
-    timestamp: u64,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerInfo {
+    pub address: String,
+    pub partition_leaders: Vec<String>,
 }
 
-impl Heartbeat {
-    pub fn new(lead_partition_count: u8) -> Self {
-        Heartbeat {
-            lead_partition_count,
-            timestamp: Self::current_timestamp(),
-        }
-    }
-
-    fn current_timestamp() -> u64 {
-        // Get the current timestamp in milliseconds
-        let now = std::time::SystemTime::now();
-        now.duration_since(std::time::UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_millis() as u64
-    }
-    pub fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(self).expect("Failed to serialize heartbeat")
-    }
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        bincode::deserialize(bytes).expect("Failed to deserialize heartbeat")
-    }
+#[derive(Debug, Clone)]
+pub struct ClusterInfo {
+    pub brokers: HashMap<String, BrokerInfo>,
+    pub topics_in_cluster: Vec<String>,
 }
 
-pub enum BrokerCommand {
+pub enum CommandToBroker {
     CreateNewTopic {
         topic: Topic,
         broker_tx: oneshot::Sender<BrokerResponse>,
+    },
+    CreatePartitionWriter {
+        topic_name: String,
+        partition_number: u8,
+        broker_tx: oneshot::Sender<BrokerResponse>,
+        role: PartitionWriterRole,
     },
     GetPartitionWriter {
         topic_name: String,
@@ -71,27 +95,39 @@ pub enum BrokerCommand {
     },
     Heartbeat {
         sender_address: String,
-        message: Heartbeat,
+        sender_status: BrokerInfo,
+        broker_tx: oneshot::Sender<BrokerResponse>,
+    },
+    RegisterPeer {
+        peer_info: BrokerInfo,
+        broker_tx: oneshot::Sender<BrokerResponse>,
+    },
+    GetStatus {
         broker_tx: oneshot::Sender<BrokerResponse>,
     },
 }
 
+#[derive(Debug)]
 pub enum BrokerResponse {
-    TopicCreated { leader_address: String },
-    TopicAlreadyExists { leader_address: String },
+    TopicCreated { partition_leaders: HashMap<u8, String> },
+    PartitionWriterCreated,
+    TopicAlreadyExists,
     PartitionNotFound,
     PartitionManagerFound { tx: mpsc::Sender<PartitionCommand> },
     TopicNotFound,
     HeartbeatReceived,
+    BrokerError { message: String },
+    PeerRegistered,
+    Status { info: BrokerInfo },
 }
 
 impl BrokerResponse {
     pub fn to_cluster_response(&self) -> ClusterResponse {
         match self {
-            BrokerResponse::TopicCreated { leader_address } => ClusterResponse::TopicCreated {
-                leader_address: leader_address.clone(),
+            BrokerResponse::TopicCreated { partition_leaders } => ClusterResponse::TopicCreated {
+                partition_leaders: partition_leaders.clone(),
             },
-            BrokerResponse::TopicAlreadyExists { leader_address } => ClusterResponse::TopicAlreadyExists,
+            BrokerResponse::TopicAlreadyExists => ClusterResponse::TopicAlreadyExists,
             _ => ClusterResponse::InternalError {
                 message: "Unknown broker response".to_string(),
             },
@@ -103,17 +139,21 @@ impl BrokerResponse {
 pub struct BrokerConfig {
     pub ip: String,
     pub port: u16,
-    pub heartbeat_interval: u8,
-    pub mpsc_max_queue_size: usize,
+    pub peer_listener_port: u16,
+    pub peers: Vec<String>,
+    pub heartbeat_interval_ms: u16,
+    pub mpsc_queue_size: usize,
     pub base_path_for_data: String,
 }
 
 pub struct BrokerConfigBuilder {
     ip: Option<String>,
     port: u16,
-    heartbeat_interval: u8,
+    peer_listener_port: u16,
+    heartbeat_interval_ms: u16,
     mpsc_max_queue_size: usize,
     base_path_for_data: String,
+    peers: Vec<String>,
 }
 
 impl BrokerConfigBuilder {
@@ -124,9 +164,11 @@ impl BrokerConfigBuilder {
         Ok(Self {
             ip: None,
             port: config.port,
-            heartbeat_interval: config.heartbeat_interval,
-            mpsc_max_queue_size: config.mpsc_max_queue_size,
+            peer_listener_port: config.peer_listener_port,
+            heartbeat_interval_ms: config.heartbeat_interval_ms,
+            mpsc_max_queue_size: config.mpsc_queue_size,
             base_path_for_data: config.base_path_for_data,
+            peers: config.peers,
         })
     }
 
@@ -135,33 +177,35 @@ impl BrokerConfigBuilder {
         self
     }
 
-    pub fn port(mut self, port: u16) -> Self {
-        self.port = port;
-        self
-    }
+    // pub fn port(mut self, port: u16) -> Self {
+    //     self.port = port;
+    //     self
+    // }
 
-    pub fn heartbeat_interval(mut self, interval: u8) -> Self {
-        self.heartbeat_interval = interval;
-        self
-    }
+    // pub fn heartbeat_interval(mut self, interval: u8) -> Self {
+    //     self.heartbeat_interval = interval;
+    //     self
+    // }
 
-    pub fn mpsc_max_queue_size(mut self, size: usize) -> Self {
-        self.mpsc_max_queue_size = size;
-        self
-    }
+    // pub fn mpsc_max_queue_size(mut self, size: usize) -> Self {
+    //     self.mpsc_max_queue_size = size;
+    //     self
+    // }
 
-    pub fn base_path_for_data(mut self, path: String) -> Self {
-        self.base_path_for_data = path;
-        self
-    }
+    // pub fn base_path_for_data(mut self, path: String) -> Self {
+    //     self.base_path_for_data = path;
+    //     self
+    // }
 
     pub fn build(self) -> BrokerConfig {
         BrokerConfig {
             ip: self.ip.unwrap_or("0.0.0.0".to_string()),
             port: self.port,
-            heartbeat_interval: self.heartbeat_interval,
-            mpsc_max_queue_size: self.mpsc_max_queue_size,
+            peer_listener_port: self.peer_listener_port,
+            heartbeat_interval_ms: self.heartbeat_interval_ms,
+            mpsc_queue_size: self.mpsc_max_queue_size,
             base_path_for_data: self.base_path_for_data,
+            peers: self.peers,
         }
     }
 }

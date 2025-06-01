@@ -1,6 +1,6 @@
 use crate::consumer::ConsumerResponse;
 use serde::{Deserialize, Serialize};
-use std::{io::Read, net::TcpStream};
+use std::{collections::HashMap, io::Read, net::TcpStream};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Message {
@@ -33,9 +33,10 @@ pub enum AckLevel {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Topic {
-    pub topic_id: Option<u64>,
+    pub id: Option<u64>,
     pub name: String,
     pub num_partitions: u8,
+    pub replication_factor: u8,
     pub retention_period_minutes: u16,
     pub ack_level: AckLevel,
 }
@@ -44,13 +45,15 @@ impl Topic {
     pub fn new(
         name: String,
         num_partitions: Option<u8>,
+        replication_factor: Option<u8>,
         retention_period_minutes: Option<u16>,
         ack_level: Option<AckLevel>,
     ) -> Self {
         Self {
-            topic_id: None,
+            id: None,
             name,
             num_partitions: num_partitions.unwrap_or(3),
+            replication_factor: replication_factor.unwrap_or(3),
             retention_period_minutes: retention_period_minutes.unwrap_or(48),
             ack_level: ack_level.unwrap_or(AckLevel::Leader),
         }
@@ -59,7 +62,7 @@ impl Topic {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum ClusterResponse {
-    TopicCreated { leader_address: String },
+    TopicCreated { partition_leaders: HashMap<u8, String> },
     TopicAlreadyExists,
     TopicNotFound,
     InternalError { message: String },

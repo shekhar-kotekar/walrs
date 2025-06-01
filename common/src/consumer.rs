@@ -72,7 +72,7 @@ impl Consumer {
             },
             None => {
                 tracing::error!("Failed to receive response from partition reader");
-                return None;
+                None
             }
             _ => {
                 tracing::error!("Received unexpected response from cluster: {:?}", response);

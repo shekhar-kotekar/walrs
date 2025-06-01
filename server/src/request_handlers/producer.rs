@@ -6,11 +6,11 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::bytes::BytesMut;
 use tokio_util::codec::Decoder;
 
-use crate::models::{BrokerCommand, BrokerResponse, PartitionCommand, PartitionWriterResponse};
+use crate::models::{BrokerResponse, CommandToBroker, PartitionCommand, PartitionWriterResponse};
 
 pub async fn handle_producer_request(
     socket: &mut TcpStream,
-    broker_tx: mpsc::Sender<BrokerCommand>,
+    broker_tx: mpsc::Sender<CommandToBroker>,
 ) -> ClusterResponse {
     tracing::info!("Producer connected.");
     let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerResponse>();
@@ -20,7 +20,7 @@ pub async fn handle_producer_request(
         Some(message_batch) => {
             let message_count = message_batch.messages.len();
             tracing::info!("Received {} messages for {}", message_count, message_batch.topic_name);
-            let find_partition_manager_command: BrokerCommand = BrokerCommand::GetPartitionWriter {
+            let find_partition_manager_command: CommandToBroker = CommandToBroker::GetPartitionWriter {
                 topic_name: message_batch.topic_name,
                 broker_tx: broker_oneshot_tx,
             };
@@ -28,8 +28,7 @@ pub async fn handle_producer_request(
             match broker_rx.await {
                 Ok(response) => match response {
                     BrokerResponse::PartitionManagerFound { tx } => {
-                        tracing::info!("Partition writer found.");
-                        return send_messages_to_partition_writer(message_batch.messages, tx).await;
+                        send_messages_to_partition_writer(message_batch.messages, tx).await
                     }
                     _ => response.to_cluster_response(),
                 },
@@ -60,7 +59,6 @@ async fn send_messages_to_partition_writer(
     match rx.await {
         Ok(response) => match response {
             PartitionWriterResponse::MessagesPersisted { count } => ClusterResponse::MessagesPersisted { count },
-            PartitionWriterResponse::InternalError { message } => ClusterResponse::InternalError { message },
         },
         Err(e) => ClusterResponse::InternalError {
             message: format!("Failed to receive partition response: {:?}", e),
