@@ -10,9 +10,9 @@ pub async fn start_peer_listener(
     broker_tx: mpsc::Sender<CommandToBroker>,
     cancellation_token: CancellationToken,
 ) {
-    let peer_listener = tokio::net::TcpListener::bind(&address)
-        .await
-        .expect(format!("Failed to bind TCP listener on: {}", address).as_str());
+    let peer_listener = tokio::net::TcpListener::bind(&address).await.unwrap_or_else(|_| {
+        panic!("Failed to bind peer listener on address: {}", address);
+    });
     tracing::info!("Peer listener started on {}", address);
 
     tokio::select! {
@@ -66,7 +66,6 @@ async fn handle_peer_request(
     tokio::select! {
         _ = cancellation_token.cancelled() => {
             tracing::info!("Peer request handler cancelled.");
-            return;
         }
         _ = async {
             let command = read_command_from_socket(&mut socket).await;
@@ -155,5 +154,5 @@ async fn read_command_from_socket(socket: &mut TcpStream) -> Option<CommandToPee
     let mut buffer = BytesMut::with_capacity(1024);
     let bytes_read = socket.read_buf(&mut buffer).await.ok()?;
     tracing::debug!("Received {} bytes from socket", bytes_read);
-    Some(crate::models::from_bytes(&mut buffer))
+    Some(crate::models::from_bytes(&buffer))
 }

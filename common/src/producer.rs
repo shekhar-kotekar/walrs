@@ -17,7 +17,7 @@ pub struct Producer {
 impl Producer {
     pub fn new(brokers: Vec<String>) -> Self {
         Producer {
-            brokers: brokers,
+            brokers,
             buffer: HashMap::new(),
         }
     }
@@ -39,7 +39,7 @@ impl Producer {
                 self.buffer.drain().for_each(|(topic, messages)| {
                     let message_batch_to_send = MessageBatch {
                         topic_name: topic,
-                        messages: messages,
+                        messages,
                     };
                     let mut buf = BytesMut::new();
                     codec

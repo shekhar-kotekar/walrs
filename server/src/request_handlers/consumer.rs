@@ -30,7 +30,7 @@ pub async fn handle_consumer_request(
                     Ok(response) => match response {
                         PartitionReaderResponse::MessagesRead { messages } => {
                             tracing::debug!("Fetched {} messages from partition of {}", messages.len(), topic_name);
-                            ConsumerResponse::MessagesFetched { messages: messages }
+                            ConsumerResponse::MessagesFetched { messages }
                         }
                         PartitionReaderResponse::InternalError { message } => {
                             ConsumerResponse::InternalError { message }

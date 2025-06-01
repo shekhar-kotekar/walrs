@@ -15,7 +15,7 @@ impl PartitionWriter {
         let partition_name = format!("{}-p{}-{:?}", topic, partition_number, role);
         let partition_path = format!("{}/{}/p{}-{:?}", base_path, topic, partition_number, role);
         std::fs::create_dir_all(&partition_path)
-            .expect(format!("Failed to create partition directory: {}", partition_name).as_str());
+            .unwrap_or_else(|_| panic!("Failed to create partition directory: {}", partition_name));
 
         PartitionWriter {
             partition_name,
@@ -38,7 +38,7 @@ impl PartitionWriter {
             .append(true)
             .open(partition_file_path)
             .await
-            .expect(format!("Failed to open partition file for partition: {}", self.partition_name).as_str());
+            .unwrap_or_else(|_| panic!("Failed to open partition file for partition: {}", self.partition_name));
 
         loop {
             tokio::select! {
@@ -77,13 +77,13 @@ impl PartitionWriter {
 
 pub struct PartitionReader {
     topic_name: String,
-    message_batch_size: u8,
+    message_batch_size: u16,
     partition_name: String,
     partition_path: String,
 }
 
 impl PartitionReader {
-    pub fn new(topic: String, partition_number: u8, base_path: String, message_batch_size: u8) -> Self {
+    pub fn new(topic: String, partition_number: u8, base_path: String, message_batch_size: u16) -> Self {
         let partition_name = format!("{}-{}", topic, partition_number);
         let partition_path = format!("{}/{}/{}", base_path, topic, partition_number);
 
@@ -101,13 +101,12 @@ impl PartitionReader {
 
         let mut lines_read = 0;
         while lines_read < self.message_batch_size
-            && reader.read_line(&mut buf).await.expect(
-                format!(
+            && reader.read_line(&mut buf).await.unwrap_or_else(|_| {
+                panic!(
                     "Failed to read line from partition for partition: {}",
                     self.partition_name
                 )
-                .as_str(),
-            ) > 0
+            }) > 0
         {
             let payload = buf.trim().as_bytes().to_vec();
             messages.push(Message { payload });
@@ -130,7 +129,8 @@ impl PartitionReader {
             .read(true)
             .open(&log_file_name)
             .await
-            .expect(format!("Failed to open partition file for reading: {}", self.partition_name).as_str());
+            .unwrap_or_else(|open_error| panic!("Failed to open partition file for reading: {}", open_error));
+
         let mut reader = tokio::io::BufReader::new(file);
 
         loop {

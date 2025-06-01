@@ -28,8 +28,7 @@ pub async fn handle_producer_request(
             match broker_rx.await {
                 Ok(response) => match response {
                     BrokerResponse::PartitionManagerFound { tx } => {
-                        tracing::info!("Partition writer found.");
-                        return send_messages_to_partition_writer(message_batch.messages, tx).await;
+                        send_messages_to_partition_writer(message_batch.messages, tx).await
                     }
                     _ => response.to_cluster_response(),
                 },
@@ -60,7 +59,6 @@ async fn send_messages_to_partition_writer(
     match rx.await {
         Ok(response) => match response {
             PartitionWriterResponse::MessagesPersisted { count } => ClusterResponse::MessagesPersisted { count },
-            PartitionWriterResponse::InternalError { message } => ClusterResponse::InternalError { message },
         },
         Err(e) => ClusterResponse::InternalError {
             message: format!("Failed to receive partition response: {:?}", e),

@@ -36,7 +36,7 @@ pub fn from_bytes<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> T {
 #[derive(Debug)]
 pub enum PartitionWriterResponse {
     MessagesPersisted { count: u8 },
-    InternalError { message: String },
+    // InternalError { message: String },
 }
 
 #[derive(Debug)]

@@ -26,19 +26,19 @@ impl ClusterAdmin {
                 tracing::debug!("request to create topic sent to broker. waiting for reply.");
 
                 let broker_response = ClusterResponse::deserialize(&mut stream);
-                if broker_response.is_some() {
-                    broker_response.unwrap()
+                if let Some(response) = broker_response {
+                    response
                 } else {
                     ClusterResponse::InternalError {
-                        message: "broker response is None".to_string(),
+                        message: "Failed to deserialize broker response".to_string(),
                     }
                 }
             }
             _ => {
                 tracing::error!("Failed to authenticate admin request");
-                return ClusterResponse::InternalError {
+                ClusterResponse::InternalError {
                     message: "Failed to authenticate admin request".to_string(),
-                };
+                }
             }
         }
     }

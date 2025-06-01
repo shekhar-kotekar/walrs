@@ -12,11 +12,10 @@ use crate::{
         BrokerInfo, BrokerResponse, ClusterInfo, CommandToBroker, CommandToPeer, Heartbeat, PartitionCommand,
         PartitionWriterRole, PeerResponse,
     },
-    partition::PartitionWriter,
+    partition::{PartitionReader, PartitionWriter},
 };
 
 const PARTITION_WRITER_MAX_QUEUE_SIZE: usize = 1000;
-const BUFFER_SIZE: usize = 512;
 
 #[derive(Debug)]
 pub struct Broker {
@@ -43,8 +42,9 @@ impl Broker {
             data_dir_path,
             address.replace(":", "_").replace(".", "_").trim()
         );
-        std::fs::create_dir_all(&data_dir_path)
-            .expect(format!("Failed to create base directory: {}", &data_dir_path).as_str());
+        std::fs::create_dir_all(&data_dir_path).unwrap_or_else(|_| {
+            panic!("Failed to create base directory: {}", &data_dir_path);
+        });
 
         Broker {
             cancellation_token,
@@ -86,8 +86,8 @@ impl Broker {
                         }
                         CommandToBroker::GetPartitionWriter { topic_name, broker_tx } => {
                             // search in partition_managers for partition writer starting with given topic_name
-
-                            if let Some(partition_manager) = self.partition_managers.get(&topic_name) {
+                            let partition_0_writer_name = format!("{}-0-{:?}", topic_name, PartitionWriterRole::Leader);
+                            if let Some(partition_manager) = self.partition_managers.get(&partition_0_writer_name) {
                                 broker_tx.send(BrokerResponse::PartitionManagerFound { tx: partition_manager.clone() }).unwrap_or_else(|e| {
                                     tracing::error!("Failed to send response for GetPartitionWriter command: {:?}", e);
                                 });
@@ -101,12 +101,7 @@ impl Broker {
                             }
                         }
                         CommandToBroker::GetPartitionReader { topic_name, broker_tx } => {
-                            let response = BrokerResponse::BrokerError {
-                                message: format!("GetPartitionReader command not implemented for topic: {}", topic_name),
-                            };
-                            broker_tx.send(response).unwrap_or_else(|e| {
-                                tracing::error!("Failed to send response for GetPartitionReader command: {:?}", e);
-                            });
+                            self.handle_get_partition_reader_command(topic_name, broker_tx).await;
                         }
                         CommandToBroker::Heartbeat { sender_address, message, broker_tx } => {
                             tracing::info!("{} received heartbeat from peer: {} :: {:?}", self.self_status.address, sender_address, message);
@@ -133,6 +128,43 @@ impl Broker {
             }
         }
         tracing::info!("{} broker stopped.", self.self_status.address);
+    }
+
+    async fn handle_get_partition_reader_command(
+        &mut self,
+        topic_name: String,
+        broker_tx: oneshot::Sender<BrokerResponse>,
+    ) {
+        let partition_reader_name = format!("{}-reader", topic_name);
+        let response: BrokerResponse =
+            if let Some(partition_reader_tx) = self.partition_managers.get(&partition_reader_name) {
+                tracing::info!("Found partition reader for topic: {}", topic_name);
+                BrokerResponse::PartitionManagerFound {
+                    tx: partition_reader_tx.clone(),
+                }
+            } else {
+                tracing::warn!("No partition reader found for topic: {}. Creating new", topic_name);
+                let mut partition_reader = PartitionReader::new(topic_name.clone(), 0, self.data_dir_path.clone(), 100);
+                let (partition_reader_tx, partition_reader_rx) =
+                    mpsc::channel::<PartitionCommand>(PARTITION_WRITER_MAX_QUEUE_SIZE);
+
+                let partition_cancellation_token = self.cancellation_token.child_token();
+                tokio::spawn(async move {
+                    partition_reader
+                        .start(partition_reader_rx, partition_cancellation_token)
+                        .await;
+                });
+                let partition_number = 0; // Assuming partition 0 for simplicity
+                let partition_reader_name = format!("{}-{}-reader", topic_name, partition_number);
+                self.partition_managers
+                    .insert(partition_reader_name, partition_reader_tx.clone());
+                BrokerResponse::PartitionManagerFound {
+                    tx: partition_reader_tx,
+                }
+            };
+        broker_tx.send(response).unwrap_or_else(|e| {
+            tracing::error!("Failed to send response for GetPartitionReader command: {:?}", e);
+        });
     }
 
     fn topic_already_exists(&self, topic_name: &str) -> bool {

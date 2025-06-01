@@ -127,7 +127,7 @@ fn get_broker_config(pod_ip: &str) -> BrokerConfig {
 async fn validate_client_request_to_connect(client_type: &ClientType, socket: &mut TcpStream) {
     let response = match client_type {
         ClientType::Producer => ClusterResponse::ConnectionAccepted,
-        ClientType::Consumer { topic_name } => ClusterResponse::ConnectionAccepted,
+        ClientType::Consumer { topic_name: _ } => ClusterResponse::ConnectionAccepted,
         ClientType::Admin => ClusterResponse::ConnectionAccepted,
     };
     socket.write_all(&bincode::serialize(&response).unwrap()).await.unwrap();
@@ -147,7 +147,6 @@ async fn process_client_request(
             };
             socket.write_all(&bincode::serialize(&internal_server_error).unwrap()).await.unwrap();
             socket.shutdown().await.unwrap();
-            return;
         }
         _ = async {
             let client_command = read_client_command(&mut socket).await;
