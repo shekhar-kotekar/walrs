@@ -54,9 +54,11 @@ mod tests {
     fn test_encode_decode_message_batch() {
         let messages = vec![
             Message {
+                key: Some("key1".to_string()),
                 payload: b"hello".to_vec(),
             },
             Message {
+                key: None,
                 payload: b"world".to_vec(),
             },
         ];
@@ -79,6 +81,7 @@ mod tests {
     #[test]
     fn test_partial_decode_returns_none() {
         let messages = vec![Message {
+            key: Some("key1".to_string()),
             payload: b"partial".to_vec(),
         }];
         let batch = MessageBatch {

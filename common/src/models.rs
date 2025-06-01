@@ -4,6 +4,7 @@ use std::{collections::HashMap, io::Read, net::TcpStream};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Message {
+    pub key: Option<String>,
     pub payload: Vec<u8>,
 }
 
@@ -11,6 +12,8 @@ pub struct Message {
 pub enum ClientCommand {
     CreateTopic { topic_details: Topic },
     RequestToConnect { client_type: ClientType },
+    GetTopicMetadata { topic_name: String },
+    GetPartitionLeaders { topics: Vec<String> },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -32,8 +35,15 @@ pub enum AckLevel {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TopicMetadata {
+    pub name: String,
+    pub ack_level: AckLevel,
+    pub partition_leaders: HashMap<u8, String>, // Maps partition number to broker address
+    pub partition_followers: HashMap<u8, Vec<String>>, // Maps partition number to follower broker addresses
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Topic {
-    pub id: Option<u64>,
     pub name: String,
     pub num_partitions: u8,
     pub replication_factor: u8,
@@ -50,11 +60,10 @@ impl Topic {
         ack_level: Option<AckLevel>,
     ) -> Self {
         Self {
-            id: None,
             name,
             num_partitions: num_partitions.unwrap_or(3),
             replication_factor: replication_factor.unwrap_or(3),
-            retention_period_minutes: retention_period_minutes.unwrap_or(48),
+            retention_period_minutes: retention_period_minutes.unwrap_or(60),
             ack_level: ack_level.unwrap_or(AckLevel::Leader),
         }
     }
@@ -71,6 +80,8 @@ pub enum ClusterResponse {
     MessagesPersisted { count: u8 },
     ConsumerResponse(ConsumerResponse),
     Success { message: String },
+    TopicMetadata { metadata: TopicMetadata },
+    PartitionLeaders { leaders: HashMap<String, Vec<String>> },
 }
 
 impl ClusterResponse {

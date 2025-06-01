@@ -1,5 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use tracing_subscriber::fmt::format::FmtSpan;
-
 pub mod admin;
 mod authenticator;
 pub mod broker_response;
@@ -25,4 +26,10 @@ pub fn init_tracing() {
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     tracing::info!("Tracing enabled!");
+}
+
+pub fn hash_code<T: Hash>(t: &T) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    t.hash(&mut hasher);
+    hasher.finish()
 }
