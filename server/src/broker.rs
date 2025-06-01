@@ -9,8 +9,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     models::{
-        BrokerInfo, BrokerResponse, ClusterInfo, CommandToBroker, CommandToPeer, Heartbeat, PartitionCommand,
-        PartitionWriterRole, PeerResponse,
+        BrokerInfo, BrokerResponse, ClusterInfo, CommandToBroker, CommandToPeer, PartitionCommand, PartitionWriterRole,
+        PeerResponse,
     },
     partition::{PartitionReader, PartitionWriter},
 };
@@ -25,11 +25,14 @@ pub struct Broker {
     cluster_info: ClusterInfo,
     self_status: BrokerInfo,
     data_dir_path: String,
+    peer_listener_address: String,
 }
 
 impl Broker {
     pub fn new(
-        address: &str,
+        ip_address: &str,
+        broker_port: u16,
+        peer_listener_port: u16,
         data_dir_path: &str,
         heartbeat_interval_ms: u16,
         cancellation_token: CancellationToken,
@@ -38,9 +41,10 @@ impl Broker {
         let heartbeat_interval = tokio::time::interval(std::time::Duration::from_millis(heartbeat_interval_ms as u64));
 
         let data_dir_path = format!(
-            "{}/{}",
+            "{}/{}-{}",
             data_dir_path,
-            address.replace(":", "_").replace(".", "_").trim()
+            ip_address.replace(':', "-").replace('.', "-"),
+            broker_port
         );
         std::fs::create_dir_all(&data_dir_path).unwrap_or_else(|_| {
             panic!("Failed to create base directory: {}", &data_dir_path);
@@ -52,10 +56,11 @@ impl Broker {
             heartbeat_interval,
             cluster_info,
             self_status: BrokerInfo {
-                address: address.to_string(),
+                address: ip_address.to_string(),
                 partition_leaders: vec![],
             },
             data_dir_path,
+            peer_listener_address: format!("{}:{}", ip_address, peer_listener_port),
         }
     }
 
@@ -103,9 +108,8 @@ impl Broker {
                         CommandToBroker::GetPartitionReader { topic_name, broker_tx } => {
                             self.handle_get_partition_reader_command(topic_name, broker_tx).await;
                         }
-                        CommandToBroker::Heartbeat { sender_address, message, broker_tx } => {
-                            tracing::info!("{} received heartbeat from peer: {} :: {:?}", self.self_status.address, sender_address, message);
-                            let _ = broker_tx.send(BrokerResponse::HeartbeatReceived);
+                        CommandToBroker::Heartbeat { sender_address, sender_status, broker_tx } => {
+                            self.update_cluster_info(&sender_address, sender_status, broker_tx).await;
                         }
                         CommandToBroker::GetStatus { broker_tx } => {
                             broker_tx.send(BrokerResponse::Status { info: self.self_status.clone() }).unwrap_or_else(|e| {
@@ -115,10 +119,13 @@ impl Broker {
                     }
                 }
                 _ = self.heartbeat_interval.tick() => {
-                    let heartbeat = Heartbeat::new(self.self_status.clone());
                     let peers: Vec<String> = self.cluster_info.brokers.keys().cloned().collect();
+                    let broker_current_status = self.self_status.clone();
+                    tracing::info!("broker current status: {:?}", broker_current_status);
+
+                    let peer_listener_address_clone = self.peer_listener_address.clone();
                     tokio::spawn(async move{
-                        Self::send_heartbeat(heartbeat, peers).await;
+                        Self::send_heartbeat(broker_current_status, peer_listener_address_clone, peers).await;
                     });
                 }
                 _ = self.cancellation_token.cancelled() => {
@@ -128,6 +135,19 @@ impl Broker {
             }
         }
         tracing::info!("{} broker stopped.", self.self_status.address);
+    }
+
+    async fn update_cluster_info(
+        &mut self,
+        peer_address: &str,
+        peer_status: BrokerInfo,
+        broker_tx: oneshot::Sender<BrokerResponse>,
+    ) {
+        tracing::info!("heartbeat received from:{} :: {:?}", peer_address, peer_status);
+        self.cluster_info
+            .brokers
+            .insert(peer_address.to_string(), peer_status.clone());
+        let _ = broker_tx.send(BrokerResponse::HeartbeatReceived);
     }
 
     async fn handle_get_partition_reader_command(
@@ -177,7 +197,7 @@ impl Broker {
         partition_number: u8,
         role: &PartitionWriterRole,
     ) -> mpsc::Sender<PartitionCommand> {
-        let mut partition_writer = PartitionWriter::new(topic_name, partition_number, role, &self.data_dir_path);
+        let mut partition_writer = PartitionWriter::new(topic_name, partition_number, &self.data_dir_path);
         let (partition_command_tx, partition_command_rx) =
             mpsc::channel::<PartitionCommand>(PARTITION_WRITER_MAX_QUEUE_SIZE);
 
@@ -248,7 +268,7 @@ impl Broker {
 
             BrokerResponse::TopicCreated {
                 partition_leaders: HashMap::from([
-                    (0, self.self_status.address.clone()),
+                    (0, self.peer_listener_address.clone()),
                     (1, peers_partition_count[0].1.clone()),
                 ]),
             }
@@ -325,7 +345,6 @@ impl Broker {
                     tracing::error!("Failed to read response size from peer {}: {}", peer_address, e);
                     return false;
                 }
-                println!("Bytes to receive: {:?}", bytes_to_receive);
                 let mut response_buffer = vec![0u8; bytes_to_receive.unwrap() as usize];
                 if let Err(e) = stream.read_exact(&mut response_buffer).await {
                     tracing::error!("Failed to read response from peer {}: {}", peer_address, e);
@@ -342,13 +361,12 @@ impl Broker {
                         );
                         return true;
                     }
-                    PeerResponse::Error { message } => {
+                    _ => {
                         tracing::error!(
-                            "Error from peer {} while creating partition writer for topic: {}, partition: {}: {}",
+                            "Error from peer {} while creating partition writer for topic: {}, partition: {}",
                             peer_address,
                             topic_name,
                             partition_number,
-                            message
                         );
                         return false;
                     }
@@ -361,8 +379,12 @@ impl Broker {
         };
     }
 
-    async fn send_heartbeat(heartbeat: Heartbeat, peers: Vec<String>) {
-        let serialized_heartbeat = crate::models::to_bytes(&heartbeat);
+    async fn send_heartbeat(broker_status: BrokerInfo, peer_listener_address: String, peers: Vec<String>) {
+        let message_to_peer: CommandToPeer = CommandToPeer::Heartbeat {
+            peer_listener_address,
+            broker_status,
+        };
+        let serialized_heartbeat = crate::models::to_bytes(&message_to_peer);
         for peer in &peers {
             match tokio::net::TcpStream::connect(peer).await {
                 Ok(mut stream) => {
@@ -397,8 +419,10 @@ mod should {
     use super::Broker;
 
     #[tokio::test]
+    // #[ignore]
     #[traced_test]
     async fn test_broker_should_be_able_to_return_handle_to_partition_writer() {
+        let peer_listener_port = 5052;
         let broker_heartbeat_interval_ms = 50;
         let data_dir_path: &str = "/tmp/walrs/data";
         let cancellation_token = CancellationToken::new();
@@ -409,7 +433,9 @@ mod should {
 
         let broker_1_cancellation_token = cancellation_token.child_token();
         let mut broker_1 = Broker::new(
-            "127.0.0.1:5050",
+            "127.0.0.1:5051",
+            5050,
+            peer_listener_port,
             data_dir_path,
             broker_heartbeat_interval_ms,
             broker_1_cancellation_token,
@@ -421,7 +447,9 @@ mod should {
 
         let broker_2_cancellation_token = cancellation_token.child_token();
         let mut broker_2 = Broker::new(
-            "127.0.0.1:5051",
+            "127.0.0.1",
+            5051,
+            peer_listener_port,
             data_dir_path,
             broker_heartbeat_interval_ms,
             broker_2_cancellation_token,
@@ -431,7 +459,7 @@ mod should {
 
         let broker_2_join_handle = tokio::spawn(async move { broker_2.start(main_to_broker_2_rx).await });
 
-        let peer_listener_address = format!("{}:{}", "127.0.0.1", 5052);
+        let peer_listener_address = format!("{}:{}", "127.0.0.1", peer_listener_port);
         let peer_listener_cancellation_token = cancellation_token.child_token();
         tokio::spawn(async move {
             crate::peer::start_peer_listener(
@@ -500,9 +528,11 @@ mod should {
     }
 
     #[tokio::test]
+    // #[ignore]
     #[traced_test]
     async fn test_broker_should_be_able_to_create_new_topic() {
         let broker_heartbeat_interval_ms = 50;
+        let peer_listener_port = 5058;
         let data_dir_path: &str = "/tmp/walrs/data";
         let cancellation_token = CancellationToken::new();
         let cluster_info = super::ClusterInfo {
@@ -512,7 +542,9 @@ mod should {
 
         let broker_1_cancellation_token = cancellation_token.child_token();
         let mut broker_1 = Broker::new(
-            "127.0.0.1:5056",
+            "127.0.0.1",
+            5056,
+            peer_listener_port,
             data_dir_path,
             broker_heartbeat_interval_ms,
             broker_1_cancellation_token,
@@ -524,7 +556,9 @@ mod should {
 
         let broker_2_cancellation_token = cancellation_token.child_token();
         let mut broker_2 = Broker::new(
-            "127.0.0.1:5057",
+            "127.0.0.1",
+            5057,
+            peer_listener_port,
             data_dir_path,
             broker_heartbeat_interval_ms,
             broker_2_cancellation_token,
@@ -534,7 +568,7 @@ mod should {
 
         let broker_2_join_handle = tokio::spawn(async move { broker_2.start(main_to_broker_2_rx).await });
 
-        let peer_listener_address = format!("{}:{}", "127.0.0.1", 5058);
+        let peer_listener_address = format!("{}:{}", "127.0.0.1", peer_listener_port);
         let peer_listener_cancellation_token = cancellation_token.child_token();
         tokio::spawn(async move {
             crate::peer::start_peer_listener(
@@ -578,6 +612,7 @@ mod should {
             broker_tx: oneshot_tx,
         };
         main_to_broker_1_tx.send(create_topic_command).await.unwrap();
+        let peer_listener_address = format!("{}:{}", "127.0.0.1", peer_listener_port);
         match oneshot_rx.await {
             Ok(response) => match response {
                 BrokerResponse::TopicCreated { partition_leaders } => {
@@ -585,7 +620,7 @@ mod should {
                     assert!(partition_leaders.contains_key(&0));
                     assert!(partition_leaders.contains_key(&1));
                     match partition_leaders.get(&0) {
-                        Some(leader) => assert_eq!(leader, "127.0.0.1:5056"),
+                        Some(leader) => assert_eq!(leader, &peer_listener_address),
                         None => panic!("Expected leader for partition 0"),
                     }
                     match partition_leaders.get(&1) {
@@ -607,6 +642,7 @@ mod should {
     #[tokio::test]
     #[traced_test]
     async fn test_broker_should_be_able_to_register_peer() {
+        let peer_listener_port = 5058;
         let broker_heartbeat_interval_ms = 50;
         let data_dir_path: &str = "/tmp/walrs/data";
         let cancellation_token = CancellationToken::new();
@@ -618,7 +654,9 @@ mod should {
 
         let broker_1_cancellation_token = cancellation_token.child_token();
         let mut broker_1 = Broker::new(
-            "127.0.0.1:5056",
+            "127.0.0.1",
+            5056,
+            peer_listener_port,
             data_dir_path,
             broker_heartbeat_interval_ms,
             broker_1_cancellation_token,
@@ -630,7 +668,9 @@ mod should {
 
         let broker_2_cancellation_token = cancellation_token.child_token();
         let mut broker_2 = Broker::new(
-            "127.0.0.1:5057",
+            "127.0.0.1",
+            5057,
+            peer_listener_port,
             data_dir_path,
             broker_heartbeat_interval_ms,
             broker_2_cancellation_token,
@@ -643,7 +683,7 @@ mod should {
         let (oneshot_tx, oneshot_rx) = oneshot::channel::<BrokerResponse>();
         let register_peer_command = CommandToBroker::RegisterPeer {
             peer_info: BrokerInfo {
-                address: "127.0.0.1:5057".to_string(),
+                address: "127.0.0.1:5058".to_string(),
                 partition_leaders: vec![],
             },
             broker_tx: oneshot_tx,
@@ -664,7 +704,7 @@ mod should {
         match oneshot_rx.await {
             Ok(response) => match response {
                 BrokerResponse::Status { info } => {
-                    assert_eq!(info.address, "127.0.0.1:5056");
+                    assert_eq!(info.address, "127.0.0.1");
                     assert_eq!(info.partition_leaders.len(), 0);
                 }
                 _ => panic!("Expected Status response, got: {:?}", response),

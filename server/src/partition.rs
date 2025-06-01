@@ -2,7 +2,7 @@ use common::models::Message;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 
-use crate::models::{PartitionCommand, PartitionReaderResponse, PartitionWriterResponse, PartitionWriterRole};
+use crate::models::{PartitionCommand, PartitionReaderResponse, PartitionWriterResponse};
 use tokio::io::AsyncBufReadExt;
 
 pub struct PartitionWriter {
@@ -11,9 +11,9 @@ pub struct PartitionWriter {
 }
 
 impl PartitionWriter {
-    pub fn new(topic: &String, partition_number: u8, role: &PartitionWriterRole, base_path: &String) -> Self {
-        let partition_name = format!("{}-p{}-{:?}", topic, partition_number, role);
-        let partition_path = format!("{}/{}/p{}-{:?}", base_path, topic, partition_number, role);
+    pub fn new(topic: &String, partition_number: u8, base_path: &String) -> Self {
+        let partition_name = format!("{}-p{}", topic, partition_number);
+        let partition_path = format!("{}/{}/p{}", base_path, topic, partition_number);
         std::fs::create_dir_all(&partition_path)
             .unwrap_or_else(|_| panic!("Failed to create partition directory: {}", partition_name));
 
@@ -85,7 +85,7 @@ pub struct PartitionReader {
 impl PartitionReader {
     pub fn new(topic: String, partition_number: u8, base_path: String, message_batch_size: u16) -> Self {
         let partition_name = format!("{}-{}", topic, partition_number);
-        let partition_path = format!("{}/{}/{}", base_path, topic, partition_number);
+        let partition_path = format!("{}/{}/p{}", base_path, topic, partition_number);
 
         PartitionReader {
             topic_name: topic,

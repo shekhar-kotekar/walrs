@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use broker::Broker;
 use common::models::{ClientCommand, ClientType, ClusterResponse};
-use models::{BrokerConfig, BrokerConfigBuilder, ClusterInfo, CommandToBroker};
+use models::{BrokerConfig, BrokerConfigBuilder, BrokerInfo, ClusterInfo, CommandToBroker};
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
@@ -14,7 +14,9 @@ use tokio::{
 };
 
 use request_handlers::{
-    admin::handle_admin_request, commons::read_client_command, consumer::handle_consumer_request,
+    admin::handle_admin_request,
+    commons::{self, read_client_command},
+    consumer::handle_consumer_request,
     producer::handle_producer_request,
 };
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
@@ -29,7 +31,7 @@ mod request_handlers;
 // TODO: Read all the constants from a config file
 const MPSC_MAX_Q_SIZE: usize = 100;
 // const K8S_SERVICE_NAME: &str = "walrs-headless-service.walrs.svc.cluster.local";
-const BASE_PATH_FOR_DATA: &str = "/tmp/walrs/data";
+// const BASE_PATH_FOR_DATA: &str = "/tmp/walrs/data";
 
 // Topic names are case sensitive.
 #[tokio::main]
@@ -39,22 +41,39 @@ async fn main() {
     //     console_subscriber::init();
     //     tracing::warn!("Console subscriber initialized.");
     // }
-    init_tracing_with_console();
+    // init_tracing_with_console();
+    common::init_tracing();
     let pod_ip: String = std::env::var("POD_IP").expect("POD_IP environment variable not set.");
 
     let task_tracker = TaskTracker::new();
     let cancellation_token = CancellationToken::new();
 
-    let cluster_info = ClusterInfo {
-        brokers: HashMap::new(),
-        topics_in_cluster: vec![],
-    };
-
-    let broker_config = get_broker_config(&pod_ip);
+    let broker_config: BrokerConfig = get_broker_config(&pod_ip);
     let broker_address = format!("{}:{}", &pod_ip, broker_config.port);
     let broker_cancellation_token = cancellation_token.child_token();
+
+    let cluster_peers: HashMap<String, BrokerInfo> = broker_config
+        .peers
+        .iter()
+        .map(|peer| {
+            (
+                peer.clone(),
+                BrokerInfo {
+                    address: peer.clone(),
+                    partition_leaders: Vec::new(),
+                },
+            )
+        })
+        .collect();
+
+    let cluster_info = ClusterInfo {
+        brokers: cluster_peers,
+        topics_in_cluster: vec![],
+    };
     let mut broker = Broker::new(
-        &broker_address,
+        &pod_ip,
+        broker_config.port,
+        broker_config.peer_listener_port,
         &broker_config.base_path_for_data,
         broker_config.heartbeat_interval_ms,
         broker_cancellation_token,
@@ -66,7 +85,7 @@ async fn main() {
 
     let peer_listener_cancellation_token = cancellation_token.child_token();
     let broker_tx = main_tx.clone();
-    let peer_listener_address = format!("{}:{}", &pod_ip, &broker_config.peer_listen_port);
+    let peer_listener_address = format!("{}:{}", &pod_ip, &broker_config.peer_listener_port);
     task_tracker.spawn(async move {
         peer::start_peer_listener(peer_listener_address, broker_tx, peer_listener_cancellation_token).await
     });
@@ -113,14 +132,16 @@ async fn main() {
 }
 
 fn get_broker_config(pod_ip: &str) -> BrokerConfig {
-    let config_file_path =
-        std::env::var("BROKER_CONFIG_FILE").unwrap_or_else(|_| "./configs/broker_conf.yml".to_string());
+    let config_file_path = std::env::var("BROKER_CONFIG_FILE").unwrap_or_else(|_| {
+        tracing::warn!("BROKER_CONFIG_FILE environment variable not set. Using default config file path.");
+        "./configs/broker_conf.yml".to_string()
+    });
 
     let builder = BrokerConfigBuilder::from_yaml_file(&config_file_path)
         .expect("Failed to read broker config from YAML file")
-        .ip(pod_ip.to_string())
-        .base_path_for_data(BASE_PATH_FOR_DATA.to_string())
-        .mpsc_max_queue_size(MPSC_MAX_Q_SIZE);
+        .ip(pod_ip.to_string());
+    // .base_path_for_data(BASE_PATH_FOR_DATA.to_string())
+    // .mpsc_max_queue_size(MPSC_MAX_Q_SIZE);
     builder.build()
 }
 

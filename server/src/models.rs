@@ -11,11 +11,16 @@ pub enum CommandToPeer {
         partition_number: u8,
         role: PartitionWriterRole,
     },
+    Heartbeat {
+        peer_listener_address: String,
+        broker_status: BrokerInfo,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum PeerResponse {
     PartitionWriterCreated,
+    HeartbeatReceived,
     Error { message: String },
 }
 
@@ -57,29 +62,6 @@ pub enum PartitionCommand {
     },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Heartbeat {
-    broker_status: BrokerInfo,
-    timestamp: u64,
-}
-
-impl Heartbeat {
-    pub fn new(broker_status: BrokerInfo) -> Self {
-        Heartbeat {
-            broker_status,
-            timestamp: Self::current_timestamp(),
-        }
-    }
-
-    fn current_timestamp() -> u64 {
-        // Get the current timestamp in milliseconds
-        let now = std::time::SystemTime::now();
-        now.duration_since(std::time::UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_millis() as u64
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrokerInfo {
     pub address: String,
@@ -113,7 +95,7 @@ pub enum CommandToBroker {
     },
     Heartbeat {
         sender_address: String,
-        message: Heartbeat,
+        sender_status: BrokerInfo,
         broker_tx: oneshot::Sender<BrokerResponse>,
     },
     RegisterPeer {
@@ -157,7 +139,7 @@ impl BrokerResponse {
 pub struct BrokerConfig {
     pub ip: String,
     pub port: u16,
-    pub peer_listen_port: u16,
+    pub peer_listener_port: u16,
     pub peers: Vec<String>,
     pub heartbeat_interval_ms: u16,
     pub mpsc_queue_size: usize,
@@ -167,8 +149,8 @@ pub struct BrokerConfig {
 pub struct BrokerConfigBuilder {
     ip: Option<String>,
     port: u16,
-    peer_listen_port: u16,
-    heartbeat_interval: u16,
+    peer_listener_port: u16,
+    heartbeat_interval_ms: u16,
     mpsc_max_queue_size: usize,
     base_path_for_data: String,
     peers: Vec<String>,
@@ -182,8 +164,8 @@ impl BrokerConfigBuilder {
         Ok(Self {
             ip: None,
             port: config.port,
-            peer_listen_port: config.peer_listen_port,
-            heartbeat_interval: config.heartbeat_interval_ms,
+            peer_listener_port: config.peer_listener_port,
+            heartbeat_interval_ms: config.heartbeat_interval_ms,
             mpsc_max_queue_size: config.mpsc_queue_size,
             base_path_for_data: config.base_path_for_data,
             peers: config.peers,
@@ -205,22 +187,22 @@ impl BrokerConfigBuilder {
     //     self
     // }
 
-    pub fn mpsc_max_queue_size(mut self, size: usize) -> Self {
-        self.mpsc_max_queue_size = size;
-        self
-    }
+    // pub fn mpsc_max_queue_size(mut self, size: usize) -> Self {
+    //     self.mpsc_max_queue_size = size;
+    //     self
+    // }
 
-    pub fn base_path_for_data(mut self, path: String) -> Self {
-        self.base_path_for_data = path;
-        self
-    }
+    // pub fn base_path_for_data(mut self, path: String) -> Self {
+    //     self.base_path_for_data = path;
+    //     self
+    // }
 
     pub fn build(self) -> BrokerConfig {
         BrokerConfig {
             ip: self.ip.unwrap_or("0.0.0.0".to_string()),
             port: self.port,
-            peer_listen_port: self.peer_listen_port,
-            heartbeat_interval_ms: self.heartbeat_interval,
+            peer_listener_port: self.peer_listener_port,
+            heartbeat_interval_ms: self.heartbeat_interval_ms,
             mpsc_queue_size: self.mpsc_max_queue_size,
             base_path_for_data: self.base_path_for_data,
             peers: self.peers,
