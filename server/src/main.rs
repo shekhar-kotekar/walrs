@@ -27,8 +27,6 @@ mod peer;
 mod request_handlers;
 
 // TODO: Read all the constants from a config file
-// const WALRS_PORT: u16 = 5056;
-const PEER_LISTENER_PORT: u16 = 5057;
 const MPSC_MAX_Q_SIZE: usize = 100;
 // const K8S_SERVICE_NAME: &str = "walrs-headless-service.walrs.svc.cluster.local";
 const BASE_PATH_FOR_DATA: &str = "/tmp/walrs/data";
@@ -53,21 +51,26 @@ async fn main() {
     };
 
     let broker_config = get_broker_config(&pod_ip);
-    let broker_port = broker_config.port;
+    let broker_address = format!("{}:{}", &pod_ip, broker_config.port);
     let broker_cancellation_token = cancellation_token.child_token();
-    let mut broker = Broker::new(broker_config, broker_cancellation_token, cluster_info);
+    let mut broker = Broker::new(
+        &broker_address,
+        &broker_config.base_path_for_data,
+        broker_config.heartbeat_interval_ms,
+        broker_cancellation_token,
+        cluster_info,
+    );
 
     let (main_tx, main_rx) = mpsc::channel::<CommandToBroker>(MPSC_MAX_Q_SIZE);
     task_tracker.spawn(async move { broker.start(main_rx).await });
 
     let peer_listener_cancellation_token = cancellation_token.child_token();
     let broker_tx = main_tx.clone();
-    let peer_listener_address = format!("{}:{}", &pod_ip, PEER_LISTENER_PORT);
+    let peer_listener_address = format!("{}:{}", &pod_ip, &broker_config.peer_listen_port);
     task_tracker.spawn(async move {
         peer::start_peer_listener(peer_listener_address, broker_tx, peer_listener_cancellation_token).await
     });
 
-    let broker_address = format!("{}:{}", &pod_ip, broker_port);
     let main_tcp_listener = TcpListener::bind(broker_address).await.unwrap();
     tracing::debug!("Listening on: {}", main_tcp_listener.local_addr().unwrap());
 

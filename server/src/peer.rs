@@ -98,9 +98,17 @@ async fn handle_peer_request(
                     message: "Failed to read command from socket".to_string(),
                 },
             };
+            let response_bytes = to_bytes(&response);
+            let response_size = response_bytes.len();
+
+            tracing::debug!("Sending response of size {} bytes", response_size);
+
+            socket.write_u32(response_size as u32)
+                .await
+                .expect("Failed to write response size to socket");
 
             socket
-                .write_all(&to_bytes(&response))
+                .write_all(&response_bytes)
                 .await
                 .expect("Failed to write response to socket");
 

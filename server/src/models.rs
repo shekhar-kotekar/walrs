@@ -157,6 +157,8 @@ impl BrokerResponse {
 pub struct BrokerConfig {
     pub ip: String,
     pub port: u16,
+    pub peer_listen_port: u16,
+    pub peers: Vec<String>,
     pub heartbeat_interval_ms: u16,
     pub mpsc_queue_size: usize,
     pub base_path_for_data: String,
@@ -165,9 +167,11 @@ pub struct BrokerConfig {
 pub struct BrokerConfigBuilder {
     ip: Option<String>,
     port: u16,
+    peer_listen_port: u16,
     heartbeat_interval: u16,
     mpsc_max_queue_size: usize,
     base_path_for_data: String,
+    peers: Vec<String>,
 }
 
 impl BrokerConfigBuilder {
@@ -178,9 +182,11 @@ impl BrokerConfigBuilder {
         Ok(Self {
             ip: None,
             port: config.port,
+            peer_listen_port: config.peer_listen_port,
             heartbeat_interval: config.heartbeat_interval_ms,
             mpsc_max_queue_size: config.mpsc_queue_size,
             base_path_for_data: config.base_path_for_data,
+            peers: config.peers,
         })
     }
 
@@ -213,9 +219,11 @@ impl BrokerConfigBuilder {
         BrokerConfig {
             ip: self.ip.unwrap_or("0.0.0.0".to_string()),
             port: self.port,
+            peer_listen_port: self.peer_listen_port,
             heartbeat_interval_ms: self.heartbeat_interval,
             mpsc_queue_size: self.mpsc_max_queue_size,
             base_path_for_data: self.base_path_for_data,
+            peers: self.peers,
         }
     }
 }
