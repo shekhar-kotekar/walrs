@@ -14,9 +14,7 @@ use tokio::{
 };
 
 use request_handlers::{
-    admin::handle_admin_request,
-    commons::{self, read_client_command},
-    consumer::handle_consumer_request,
+    admin::handle_admin_request, commons::read_client_command, consumer::handle_consumer_request,
     producer::handle_producer_request,
 };
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
@@ -24,7 +22,7 @@ use tracing_subscriber::prelude::*;
 
 mod broker;
 mod models;
-mod partition;
+mod partition_managers;
 mod peer;
 mod request_handlers;
 

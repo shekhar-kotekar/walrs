@@ -12,7 +12,7 @@ use crate::{
         BrokerInfo, BrokerResponse, ClusterInfo, CommandToBroker, CommandToPeer, PartitionCommand, PartitionWriterRole,
         PeerResponse,
     },
-    partition::{PartitionReader, PartitionWriter},
+    partition_managers::{partition_reader::PartitionReader, partition_writer::PartitionWriter},
 };
 
 const PARTITION_WRITER_MAX_QUEUE_SIZE: usize = 1000;
