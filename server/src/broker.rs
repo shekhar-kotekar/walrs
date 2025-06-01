@@ -43,7 +43,7 @@ impl Broker {
         let data_dir_path = format!(
             "{}/{}-{}",
             data_dir_path,
-            ip_address.replace(':', "-").replace('.', "-"),
+            ip_address.replace([':', '.'], "-"),
             broker_port
         );
         std::fs::create_dir_all(&data_dir_path).unwrap_or_else(|_| {
@@ -116,6 +116,7 @@ impl Broker {
                                 tracing::error!("Failed to send response for GetStatus command: {:?}", e);
                             });
                         }
+                        CommandToBroker::GetTopicMetadata { topic_name, broker_tx } => self.get_topic_metadata(&topic_name, broker_tx).await
                     }
                 }
                 _ = self.heartbeat_interval.tick() => {
@@ -135,6 +136,23 @@ impl Broker {
             }
         }
         tracing::info!("{} broker stopped.", self.self_status.address);
+    }
+
+    async fn get_topic_metadata(&self, topic_name: &String, broker_tx: oneshot::Sender<BrokerResponse>) {
+        tracing::info!("Fetching metadata for topic: {}", topic_name);
+        if let Some(topic_metadata) = self.cluster_info.topics_in_cluster.get(topic_name) {
+            broker_tx
+                .send(BrokerResponse::TopicMetadata {
+                    metadata: topic_metadata.clone(),
+                })
+                .unwrap_or_else(|e| {
+                    tracing::error!("Failed to send response for GetTopicMetadata command: {:?}", e);
+                });
+        } else {
+            broker_tx.send(BrokerResponse::TopicNotFound).unwrap_or_else(|e| {
+                tracing::error!("Failed to send response for GetTopicMetadata command: {:?}", e);
+            });
+        }
     }
 
     async fn update_cluster_info(
@@ -187,10 +205,6 @@ impl Broker {
         });
     }
 
-    fn topic_already_exists(&self, topic_name: &str) -> bool {
-        self.cluster_info.topics_in_cluster.iter().any(|t| t == topic_name)
-    }
-
     async fn create_partition_writer(
         &self,
         topic_name: &String,
@@ -219,7 +233,7 @@ impl Broker {
     async fn create_topic(&mut self, topic: Topic, broker_tx: oneshot::Sender<BrokerResponse>) {
         tracing::info!("Creating topic: {:?}", topic);
 
-        let response = if self.topic_already_exists(&topic.name) {
+        let response = if self.cluster_info.topics_in_cluster.contains_key(&topic.name) {
             BrokerResponse::TopicAlreadyExists
         } else if (self.cluster_info.brokers.len() + 1) < topic.replication_factor as usize {
             BrokerResponse::BrokerError {
@@ -414,7 +428,7 @@ mod should {
     use tokio_util::sync::CancellationToken;
     use tracing_test::traced_test;
 
-    use crate::models::{BrokerInfo, BrokerResponse, CommandToBroker};
+    use crate::models::{BrokerInfo, BrokerResponse, ClusterInfo, CommandToBroker};
 
     use super::Broker;
 
@@ -426,10 +440,7 @@ mod should {
         let broker_heartbeat_interval_ms = 50;
         let data_dir_path: &str = "/tmp/walrs/data";
         let cancellation_token = CancellationToken::new();
-        let cluster_info = super::ClusterInfo {
-            brokers: HashMap::new(),
-            topics_in_cluster: vec![],
-        };
+        let cluster_info = ClusterInfo::new();
 
         let broker_1_cancellation_token = cancellation_token.child_token();
         let mut broker_1 = Broker::new(
@@ -491,7 +502,6 @@ mod should {
 
         let (oneshot_tx, _) = oneshot::channel::<BrokerResponse>();
         let topic_to_create = Topic {
-            id: None,
             name: "test_topic".to_string(),
             num_partitions: 2,
             replication_factor: 2,
@@ -535,10 +545,7 @@ mod should {
         let peer_listener_port = 5058;
         let data_dir_path: &str = "/tmp/walrs/data";
         let cancellation_token = CancellationToken::new();
-        let cluster_info = super::ClusterInfo {
-            brokers: HashMap::new(),
-            topics_in_cluster: vec![],
-        };
+        let cluster_info = ClusterInfo::new();
 
         let broker_1_cancellation_token = cancellation_token.child_token();
         let mut broker_1 = Broker::new(
@@ -600,7 +607,6 @@ mod should {
 
         let (oneshot_tx, oneshot_rx) = oneshot::channel::<BrokerResponse>();
         let topic_to_create = Topic {
-            id: None,
             name: "test_topic".to_string(),
             num_partitions: 2,
             replication_factor: 2,
@@ -647,10 +653,7 @@ mod should {
         let data_dir_path: &str = "/tmp/walrs/data";
         let cancellation_token = CancellationToken::new();
 
-        let cluster_info = super::ClusterInfo {
-            brokers: HashMap::new(),
-            topics_in_cluster: vec![],
-        };
+        let cluster_info = ClusterInfo::new();
 
         let broker_1_cancellation_token = cancellation_token.child_token();
         let mut broker_1 = Broker::new(

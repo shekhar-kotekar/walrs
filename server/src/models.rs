@@ -41,7 +41,6 @@ pub fn from_bytes<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> T {
 #[derive(Debug)]
 pub enum PartitionWriterResponse {
     MessagesPersisted { count: u8 },
-    // InternalError { message: String },
 }
 
 #[derive(Debug)]
@@ -71,7 +70,29 @@ pub struct BrokerInfo {
 #[derive(Debug, Clone)]
 pub struct ClusterInfo {
     pub brokers: HashMap<String, BrokerInfo>,
-    pub topics_in_cluster: Vec<String>,
+    pub topics_in_cluster: HashMap<String, common::models::TopicMetadata>,
+}
+
+impl ClusterInfo {
+    pub fn new() -> Self {
+        Self {
+            brokers: HashMap::new(),
+            topics_in_cluster: HashMap::new(),
+        }
+    }
+
+    pub fn add_broker(&mut self, broker_info: BrokerInfo) {
+        self.brokers.insert(broker_info.address.clone(), broker_info);
+    }
+
+    pub fn add_topic_metadata(&mut self, topic_metadata: common::models::TopicMetadata) {
+        self.topics_in_cluster
+            .insert(topic_metadata.name.clone(), topic_metadata);
+    }
+    pub fn with_peers(mut self, peers: std::collections::HashMap<String, BrokerInfo>) -> Self {
+        self.brokers = peers;
+        self
+    }
 }
 
 pub enum CommandToBroker {
@@ -105,6 +126,10 @@ pub enum CommandToBroker {
     GetStatus {
         broker_tx: oneshot::Sender<BrokerResponse>,
     },
+    GetTopicMetadata {
+        topic_name: String,
+        broker_tx: oneshot::Sender<BrokerResponse>,
+    },
 }
 
 #[derive(Debug)]
@@ -119,6 +144,7 @@ pub enum BrokerResponse {
     BrokerError { message: String },
     PeerRegistered,
     Status { info: BrokerInfo },
+    TopicMetadata { metadata: common::models::TopicMetadata },
 }
 
 impl BrokerResponse {

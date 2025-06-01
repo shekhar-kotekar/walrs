@@ -14,11 +14,13 @@ use tokio::{
 };
 
 use request_handlers::{
-    admin::handle_admin_request, commons::read_client_command, consumer::handle_consumer_request,
+    admin::handle_admin_request,
+    commons::{handle_get_topic_metadata_request, read_client_command},
+    consumer::handle_consumer_request,
     producer::handle_producer_request,
 };
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
-use tracing_subscriber::prelude::*;
+// use tracing_subscriber::prelude::*;
 
 mod broker;
 mod models;
@@ -64,10 +66,7 @@ async fn main() {
         })
         .collect();
 
-    let cluster_info = ClusterInfo {
-        brokers: cluster_peers,
-        topics_in_cluster: vec![],
-    };
+    let cluster_info = ClusterInfo::new().with_peers(cluster_peers);
     let mut broker = Broker::new(
         &pod_ip,
         broker_config.port,
@@ -144,6 +143,7 @@ fn get_broker_config(pod_ip: &str) -> BrokerConfig {
 }
 
 async fn validate_client_request_to_connect(client_type: &ClientType, socket: &mut TcpStream) {
+    tracing::info!("Client requested to connect: {:?}", client_type);
     let response = match client_type {
         ClientType::Producer => ClusterResponse::ConnectionAccepted,
         ClientType::Consumer { topic_name: _ } => ClusterResponse::ConnectionAccepted,
@@ -174,9 +174,7 @@ async fn process_client_request(
                     tracing::debug!("Received client command: {:?}", command);
                     match command {
                         ClientCommand::RequestToConnect { client_type } => {
-                            tracing::info!("Client requested to connect: {:?}", client_type);
                             validate_client_request_to_connect(&client_type, &mut socket).await;
-
                             match &client_type {
                                 ClientType::Producer =>  handle_producer_request(&mut socket, broker_tx).await,
                                 ClientType::Consumer { topic_name } => {
@@ -185,6 +183,9 @@ async fn process_client_request(
                                 },
                                 ClientType::Admin => handle_admin_request(&mut socket, broker_tx).await,
                             }
+                        }
+                        ClientCommand::GetTopicMetadata { topic_name } => {
+                            handle_get_topic_metadata_request(&topic_name, broker_tx).await
                         }
                         _ => {
                             tracing::warn!("Unknown client command: {:?}", command);
@@ -210,24 +211,24 @@ async fn process_client_request(
     }
 }
 
-fn init_tracing_with_console() {
-    let console_layer = console_subscriber::spawn();
+// fn init_tracing_with_console() {
+//     let console_layer = console_subscriber::spawn();
 
-    let tracing_layer = tracing_subscriber::fmt::layer()
-        .with_target(false)
-        .with_thread_ids(true)
-        .with_filter(if cfg!(debug_assertions) {
-            tracing_subscriber::filter::LevelFilter::DEBUG
-        } else {
-            tracing_subscriber::filter::LevelFilter::INFO
-        });
+//     let tracing_layer = tracing_subscriber::fmt::layer()
+//         .with_target(false)
+//         .with_thread_ids(true)
+//         .with_filter(if cfg!(debug_assertions) {
+//             tracing_subscriber::filter::LevelFilter::DEBUG
+//         } else {
+//             tracing_subscriber::filter::LevelFilter::INFO
+//         });
 
-    tracing_subscriber::registry()
-        .with(console_layer)
-        .with(tracing_layer)
-        .init();
-    tracing::info!("Console and tracing subscriber initialized.");
-}
+//     tracing_subscriber::registry()
+//         .with(console_layer)
+//         .with(tracing_layer)
+//         .init();
+//     tracing::info!("Console and tracing subscriber initialized.");
+// }
 
 // Main will be responsible for external facing communication like producer or consumer requests.
 // Internal communication will be handled by Node and partition managers.

@@ -39,7 +39,7 @@ impl PartitionReader {
             }) > 0
         {
             let payload = buf.trim().as_bytes().to_vec();
-            messages.push(Message { payload });
+            messages.push(Message { key: None, payload });
             buf.clear();
             lines_read += 1;
         }
