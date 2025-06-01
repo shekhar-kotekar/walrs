@@ -24,9 +24,11 @@ async fn main() {
         ),
     };
     let first_message = Message {
+        key: Some("key1".to_string()),
         payload: "first_message".as_bytes().to_vec(),
     };
     let second_message = Message {
+        key: None,
         payload: "second_message".as_bytes().to_vec(),
     };
     let sent_messages = vec![first_message, second_message];
@@ -60,7 +62,7 @@ async fn main() {
 fn send_messages(topic_name: &str, messages: Vec<Message>) {
     let mut producer = Producer::new(vec!["127.0.0.1:5056".into()]);
     for message in messages {
-        producer.send(topic_name.to_owned(), message);
+        producer.send(topic_name.to_owned(), &message);
     }
     let cluster_response: ClusterResponse = producer.flush();
     match cluster_response {
