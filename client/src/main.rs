@@ -7,17 +7,17 @@ use common::{
 
 #[tokio::main]
 async fn main() {
-    common::init_tracing();
+    common::init_tracing(None);
     let admin = ClusterAdmin {
         brokers: vec!["127.0.0.1:5056".into(), "broker2:9092".into()],
     };
     let topic_name: &str = "my_new_topic";
 
-    let replication_factor: u8 = 3;
+    let replication_factor: u8 = 2;
     let command = ClientCommand::CreateTopic {
         topic_details: Topic::new(
             topic_name.to_string(),
-            Some(3),
+            Some(2),
             Some(replication_factor),
             Some(48),
             Some(AckLevel::Leader),
@@ -36,12 +36,14 @@ async fn main() {
         ClusterResponse::TopicCreated { partition_leaders } => {
             tracing::info!("Topic created successfully. Partition leaders: {:?}", partition_leaders);
             send_messages(topic_name, sent_messages.clone());
-            read_messages(topic_name, admin.brokers.clone()).await
+            // read_messages(topic_name, admin.brokers.clone()).await
+            Vec::new() // Temporarily returning an empty vector to avoid compilation error
         }
         ClusterResponse::TopicAlreadyExists => {
             tracing::info!("{} topic already exists.", topic_name);
             send_messages(topic_name, sent_messages.clone());
-            read_messages(topic_name, admin.brokers.clone()).await
+            // read_messages(topic_name, admin.brokers.clone()).await
+            Vec::new() // Temporarily returning an empty vector to avoid compilation error
         }
         e => {
             tracing::error!("Failed to create topic because: {:?}", e);

@@ -3,6 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, io::Read, net::TcpStream};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ProducerCommand {
+    WriteMessages { topic_name: String, messages: Vec<Message> },
+    GetPartitionLeaders { topics: Vec<String> },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Message {
     pub key: Option<String>,
     pub payload: Vec<u8>,
@@ -34,12 +40,28 @@ pub enum AckLevel {
     All,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum PartitionWriterRole {
+    Leader { follower_addresses: Vec<String> },
+    Follower,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TopicMetadata {
+    pub id: u64,
     pub name: String,
+    pub replication_factor: u8,
+    pub retention_period_minutes: u16,
     pub ack_level: AckLevel,
-    pub partition_leaders: HashMap<u8, String>, // Maps partition number to broker address
-    pub partition_followers: HashMap<u8, Vec<String>>, // Maps partition number to follower broker addresses
+    pub partitions: Vec<PartitionInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PartitionInfo {
+    pub number: u8,
+    pub role: PartitionWriterRole,
+    pub leader_address: String,
+    pub follower_addresses: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -69,7 +91,7 @@ impl Topic {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ClusterResponse {
     TopicCreated { partition_leaders: HashMap<u8, String> },
     TopicAlreadyExists,

@@ -4,4 +4,4 @@ peer_listener_port: 5059
 heartbeat_interval_ms: 9000
 mpsc_queue_size: 100
 base_path_for_data: "/tmp/walrs/data"
-peers: ["0.0.0.0:5057"]
+peers: ["127.0.0.1:5057"]

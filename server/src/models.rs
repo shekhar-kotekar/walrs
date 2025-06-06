@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use common::models::{ClusterResponse, Message, Topic};
+use common::models::{ClusterResponse, Message, PartitionWriterRole, Topic};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
@@ -22,20 +22,6 @@ pub enum PeerResponse {
     PartitionWriterCreated,
     HeartbeatReceived,
     Error { message: String },
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum PartitionWriterRole {
-    Leader,
-    Follower,
-}
-
-pub fn to_bytes<T: Serialize>(value: &T) -> Vec<u8> {
-    bincode::serialize(value).expect("Failed to serialize value")
-}
-
-pub fn from_bytes<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> T {
-    bincode::deserialize(bytes).expect("Failed to deserialize value")
 }
 
 #[derive(Debug)]
@@ -63,8 +49,15 @@ pub enum PartitionCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrokerInfo {
-    pub address: String,
-    pub partition_leaders: Vec<String>,
+    pub registed_topics: Vec<String>,
+}
+
+impl BrokerInfo {
+    pub fn new() -> Self {
+        Self {
+            registed_topics: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -80,21 +73,24 @@ impl ClusterInfo {
             topics_in_cluster: HashMap::new(),
         }
     }
-
-    pub fn add_broker(&mut self, broker_info: BrokerInfo) {
-        self.brokers.insert(broker_info.address.clone(), broker_info);
-    }
-
-    pub fn add_topic_metadata(&mut self, topic_metadata: common::models::TopicMetadata) {
-        self.topics_in_cluster
-            .insert(topic_metadata.name.clone(), topic_metadata);
-    }
-    pub fn with_peers(mut self, peers: std::collections::HashMap<String, BrokerInfo>) -> Self {
-        self.brokers = peers;
+    pub fn with_peers(mut self, peers: Vec<String>) -> Self {
+        self.brokers = peers
+            .into_iter()
+            .map(|peer| {
+                let broker_info = BrokerInfo {
+                    registed_topics: Vec::new(),
+                };
+                (peer, broker_info)
+            })
+            .collect();
         self
+    }
+    pub fn add_broker(&mut self, broker_address: String, broker_info: BrokerInfo) {
+        self.brokers.insert(broker_address, broker_info);
     }
 }
 
+#[derive(Debug)]
 pub enum CommandToBroker {
     CreateNewTopic {
         topic: Topic,
@@ -123,28 +119,38 @@ pub enum CommandToBroker {
         peer_info: BrokerInfo,
         broker_tx: oneshot::Sender<BrokerResponse>,
     },
-    GetStatus {
-        broker_tx: oneshot::Sender<BrokerResponse>,
-    },
     GetTopicMetadata {
         topic_name: String,
+        broker_tx: oneshot::Sender<BrokerResponse>,
+    },
+    GetPartitionLeaders {
+        topics: Vec<String>,
         broker_tx: oneshot::Sender<BrokerResponse>,
     },
 }
 
 #[derive(Debug)]
 pub enum BrokerResponse {
-    TopicCreated { partition_leaders: HashMap<u8, String> },
+    TopicCreated {
+        partition_leaders: HashMap<u8, String>,
+    },
     PartitionWriterCreated,
     TopicAlreadyExists,
-    PartitionNotFound,
-    PartitionManagerFound { tx: mpsc::Sender<PartitionCommand> },
+    PartitionManagerFound {
+        tx: mpsc::Sender<PartitionCommand>,
+    },
     TopicNotFound,
     HeartbeatReceived,
-    BrokerError { message: String },
+    BrokerError {
+        message: String,
+    },
     PeerRegistered,
-    Status { info: BrokerInfo },
-    TopicMetadata { metadata: common::models::TopicMetadata },
+    TopicMetadata {
+        metadata: common::models::TopicMetadata,
+    },
+    PartitionLeaders {
+        partition_leaders: HashMap<String, Vec<String>>,
+    },
 }
 
 impl BrokerResponse {
@@ -154,6 +160,9 @@ impl BrokerResponse {
                 partition_leaders: partition_leaders.clone(),
             },
             BrokerResponse::TopicAlreadyExists => ClusterResponse::TopicAlreadyExists,
+            BrokerResponse::BrokerError { message } => ClusterResponse::InternalError {
+                message: message.clone(),
+            },
             _ => ClusterResponse::InternalError {
                 message: "Unknown broker response".to_string(),
             },
@@ -202,26 +211,6 @@ impl BrokerConfigBuilder {
         self.ip = Some(ip);
         self
     }
-
-    // pub fn port(mut self, port: u16) -> Self {
-    //     self.port = port;
-    //     self
-    // }
-
-    // pub fn heartbeat_interval(mut self, interval: u8) -> Self {
-    //     self.heartbeat_interval = interval;
-    //     self
-    // }
-
-    // pub fn mpsc_max_queue_size(mut self, size: usize) -> Self {
-    //     self.mpsc_max_queue_size = size;
-    //     self
-    // }
-
-    // pub fn base_path_for_data(mut self, path: String) -> Self {
-    //     self.base_path_for_data = path;
-    //     self
-    // }
 
     pub fn build(self) -> BrokerConfig {
         BrokerConfig {

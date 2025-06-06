@@ -35,14 +35,15 @@ impl Producer {
         match authenticator::authenticate(&mut stream, ClientType::Producer) {
             Some(ClusterResponse::ConnectionAccepted) => {
                 tracing::info!("Producer authenticated.");
-                let partition_leaders = match self.get_partition_leaders_for_topics(&mut stream) {
-                    Some(leaders) => leaders,
-                    None => {
-                        return ClusterResponse::InternalError {
-                            message: "Failed to get partition leaders.".to_string(),
+                let partition_leaders: HashMap<String, Vec<String>> =
+                    match self.get_partition_leaders_for_topics(&mut stream) {
+                        Some(leaders) => leaders,
+                        None => {
+                            return ClusterResponse::InternalError {
+                                message: "Failed to get partition leaders.".to_string(),
+                            }
                         }
-                    }
-                };
+                    };
 
                 let messages_grouped_by_brokers = self.map_messages_to_brokers(&partition_leaders);
 
