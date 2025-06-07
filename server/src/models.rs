@@ -5,7 +5,7 @@ use common::models::{ClusterResponse, Message, Topic};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum PartitionRole {
     Leader { followers: HashMap<String, usize> },
     Follower { leader_address: String },
@@ -114,8 +114,8 @@ pub enum CommandToBroker {
     CreatePartitionWriter {
         topic_name: String,
         partition_number: u8,
-        broker_tx: oneshot::Sender<BrokerResponse>,
         role: PartitionRole,
+        broker_tx: oneshot::Sender<BrokerResponse>,
     },
     GetPartitionWriter {
         topic_name: String,

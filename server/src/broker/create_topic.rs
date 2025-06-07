@@ -174,13 +174,13 @@ fn find_peers_for_topic(
     // sort peers in descending order of number of partitions they have
     // and return the top N peers where N is the number of partitions
     // we will use this to distribute partitions across peers
-    tracing::info!("Finding peers for topic with {} partitions", num_partitions);
 
     // sort peers by number of registered topics in descending order
     let mut peers_sorted_by_number_of_topics: Vec<(usize, String)> = cluster_info
         .brokers
         .iter()
         .map(|(peer_address, peer_info)| (peer_info.registed_topics.len(), peer_address.clone()))
+        .filter(|&(_, ref peer_address)| peer_address != self_address)
         .collect();
     peers_sorted_by_number_of_topics.sort_by_key(|&(topic_count, _)| topic_count);
 
@@ -305,7 +305,7 @@ async fn request_peer_to_create_follower_partitions(
         },
     };
     tracing::info!(
-        "Requesting peer {} to create partition writer for topic {} with partition number {}",
+        "Requesting peer {} to create follower partition for topic: {}, partition number: {}",
         peer_address,
         topic_name,
         partition_number

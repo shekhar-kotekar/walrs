@@ -67,7 +67,6 @@ impl Broker {
                 Some(command) = command_rx.recv() => {
                     match command {
                         CommandToBroker::CreateNewTopic { topic, broker_tx } => {
-                            tracing::info!("Received command to create new topic: {:?}", topic);
                             let result: Option<(mpsc::Sender<PartitionCommand>, TopicMetadata)> = create_topic::create_topic(
                                 topic.clone(),
                                 self.address.clone(),
@@ -88,6 +87,28 @@ impl Broker {
                                 });
                             } else {
                                 tracing::error!("Failed to create topic: {:?}", topic);
+                            }
+                        }
+                        CommandToBroker::CreatePartitionWriter { topic_name, partition_number, role, broker_tx } => {
+                            match create_topic::create_partition(
+                                &topic_name,
+                                partition_number,
+                                &self.address,
+                                role.clone(),
+                                &self.data_dir_path,
+                                cancellation_token.clone(),
+                            ).await {
+                                Some(partition_writer_tx) => {
+                                    self.local_partition_writers.insert(topic_name.clone(), partition_writer_tx);
+                                    broker_tx.send(BrokerResponse::PartitionWriterCreated).unwrap_or_else(|e| {
+                                        tracing::error!("Failed to send broker response: {:?}", e);
+                                    });
+                                }
+                                None => {
+                                    broker_tx.send(BrokerResponse::BrokerError { message: format!("Failed to create partition for topic: {} partition: {}, role: {}", topic_name, partition_number, role) }).unwrap_or_else(|e| {
+                                        tracing::error!("Failed to send broker response: {:?}", e);
+                                    });
+                                }
                             }
                         }
                         CommandToBroker::Heartbeat { sender_address, sender_status, broker_tx } => self.update_cluster_info(&sender_address, sender_status, broker_tx).await,
