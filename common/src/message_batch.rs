@@ -18,7 +18,8 @@ impl Encoder<MessageBatch> for MessageBatchCodec {
     type Error = std::io::Error;
 
     fn encode(&mut self, item: MessageBatch, buf: &mut BytesMut) -> Result<(), Self::Error> {
-        let encoded_batch = bincode::serialize(&item).map_err(|e| Error::new(ErrorKind::Other, e))?;
+        let encoded_batch =
+            bincode::serialize(&item).map_err(|e| Error::new(ErrorKind::Other, e))?;
         buf.put_u32(encoded_batch.len() as u32);
         buf.extend_from_slice(&encoded_batch);
         Ok(())
@@ -71,7 +72,9 @@ mod tests {
         let mut buf = BytesMut::new();
 
         // Encode the batch
-        codec.encode(batch.clone(), &mut buf).expect("Encoding failed");
+        codec
+            .encode(batch.clone(), &mut buf)
+            .expect("Encoding failed");
 
         // Decode the batch
         let decoded = codec.decode(&mut buf).expect("Decoding failed");

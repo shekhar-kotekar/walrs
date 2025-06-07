@@ -47,21 +47,26 @@ impl Producer {
 
                 let messages_grouped_by_brokers = self.map_messages_to_brokers(&partition_leaders);
 
-                messages_grouped_by_brokers.iter().for_each(|(broker, messages)| {
-                    let mut stream = TcpStream::connect(broker).unwrap();
-                    tracing::debug!("Connected to broker: {}", broker);
-                    for message_batch in messages {
-                        let mut buf = BytesMut::new();
-                        self.message_batch_codec
-                            .encode(message_batch.clone(), &mut buf)
-                            .expect("Encoding failed for messages being sent.");
-                        stream.write_all(&buf).unwrap_or_else(|_| {
-                            tracing::error!("Failed to write message batch to broker: {}", broker)
-                        });
-                    }
-                    stream.flush().unwrap();
-                    tracing::debug!("Messages sent to broker: {}", broker);
-                });
+                messages_grouped_by_brokers
+                    .iter()
+                    .for_each(|(broker, messages)| {
+                        let mut stream = TcpStream::connect(broker).unwrap();
+                        tracing::debug!("Connected to broker: {}", broker);
+                        for message_batch in messages {
+                            let mut buf = BytesMut::new();
+                            self.message_batch_codec
+                                .encode(message_batch.clone(), &mut buf)
+                                .expect("Encoding failed for messages being sent.");
+                            stream.write_all(&buf).unwrap_or_else(|_| {
+                                tracing::error!(
+                                    "Failed to write message batch to broker: {}",
+                                    broker
+                                )
+                            });
+                        }
+                        stream.flush().unwrap();
+                        tracing::debug!("Messages sent to broker: {}", broker);
+                    });
                 ClusterResponse::MessagesPersisted {
                     count: self.buffer.values().map(|v| v.len()).sum::<usize>() as u8,
                 }
@@ -80,8 +85,10 @@ impl Producer {
         let mut messages_grouped_by_brokers: HashMap<String, Vec<MessageBatch>> = HashMap::new();
         let drained_buffer: Vec<(String, Vec<Message>)> = self.buffer.drain().collect();
         for (topic, messages) in drained_buffer {
-            let partition_leaders_for_topic = partition_leaders.get(&topic).cloned().unwrap_or_default();
-            let brokers_for_topic = self.group_messages_by_brokers(partition_leaders_for_topic, messages);
+            let partition_leaders_for_topic =
+                partition_leaders.get(&topic).cloned().unwrap_or_default();
+            let brokers_for_topic =
+                self.group_messages_by_brokers(partition_leaders_for_topic, messages);
 
             for (broker, messages) in brokers_for_topic {
                 let message_batch = MessageBatch {
@@ -203,7 +210,10 @@ mod should {
             key: None,
             payload: b"message_3".to_vec(),
         };
-        let mut producer = Producer::new(vec!["broker_1:9092".to_string(), "broker_2:9092".to_string()]);
+        let mut producer = Producer::new(vec![
+            "broker_1:9092".to_string(),
+            "broker_2:9092".to_string(),
+        ]);
         producer.send("topic1".to_string(), &message_1);
         producer.send("topic1".to_string(), &message_2);
         producer.send("topic1".to_string(), &message_3);
@@ -215,7 +225,8 @@ mod should {
         tracing::debug!("Grouped messages: {:?}", grouped_messages);
         assert_eq!(grouped_messages.len(), 2);
         assert!(
-            grouped_messages.contains_key("broker_1:9092") || grouped_messages.contains_key("broker_2:9092")
+            grouped_messages.contains_key("broker_1:9092")
+                || grouped_messages.contains_key("broker_2:9092")
         );
     }
 
@@ -280,9 +291,11 @@ mod should {
 
         let messages_grouped_by_brokers = producer.map_messages_to_brokers(&partition_leaders);
         tracing::debug!("Messages grouped by brokers:");
-        messages_grouped_by_brokers.iter().for_each(|(broker, messages)| {
-            tracing::debug!("Broker: {}, Messages: {:?}", broker, messages);
-        });
+        messages_grouped_by_brokers
+            .iter()
+            .for_each(|(broker, messages)| {
+                tracing::debug!("Broker: {}, Messages: {:?}", broker, messages);
+            });
         assert_eq!(messages_grouped_by_brokers.len(), 3);
     }
 }

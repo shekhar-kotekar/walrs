@@ -42,7 +42,7 @@ async fn main() {
     //     tracing::warn!("Console subscriber initialized.");
     // }
     // init_tracing_with_console();
-    common::init_tracing(Some(tracing::Level::INFO));
+    common::init_tracing(Some(tracing::Level::DEBUG));
     let pod_ip: String = std::env::var("POD_IP").expect("POD_IP environment variable not set.");
 
     let task_tracker = TaskTracker::new();
@@ -60,29 +60,35 @@ async fn main() {
         broker_config.heartbeat_interval_ms,
     );
 
-    let (main_tx, main_rx) = mpsc::channel::<CommandToBroker>(MPSC_MAX_Q_SIZE);
-    task_tracker.spawn(async move { broker.start(main_rx, broker_cancellation_token).await });
+    let (broker_tx, broker_rx) = mpsc::channel::<CommandToBroker>(MPSC_MAX_Q_SIZE);
+    task_tracker.spawn(async move { broker.start(broker_rx, broker_cancellation_token).await });
 
     let peer_listener_cancellation_token = cancellation_token.child_token();
-    let broker_tx = main_tx.clone();
+    let broker_tx_clone = broker_tx.clone();
     let peer_listener_address = format!("{}:{}", &pod_ip, &broker_config.peer_listener_port);
     task_tracker.spawn(async move {
-        peer::start_peer_listener(peer_listener_address, broker_tx, peer_listener_cancellation_token).await
+        peer::start_peer_listener(
+            peer_listener_address,
+            broker_tx_clone,
+            peer_listener_cancellation_token,
+        )
+        .await
     });
 
     let main_tcp_listener = TcpListener::bind(broker_address).await.unwrap();
     tracing::debug!("Listening on: {}", main_tcp_listener.local_addr().unwrap());
 
-    let mut sigterm: Signal = signal(SignalKind::terminate()).expect("Failed to create signal handler");
+    let mut sigterm: Signal =
+        signal(SignalKind::terminate()).expect("Failed to create signal handler");
 
     tokio::select! {
         _ = async {
             loop {
                 let (socket, _) = main_tcp_listener.accept().await.unwrap();
-                let main_tx_clone = main_tx.clone();
+                let broker_tx_clone = broker_tx.clone();
                 let client_request_cancellation_token = cancellation_token.child_token();
                 task_tracker.spawn(async move {
-                    process_client_request(socket, main_tx_clone, client_request_cancellation_token).await;
+                    process_client_request(socket, broker_tx_clone, client_request_cancellation_token).await;
                 });
             }
         } => {
@@ -113,7 +119,9 @@ async fn main() {
 
 fn get_broker_config(pod_ip: &str) -> BrokerConfig {
     let config_file_path = std::env::var("BROKER_CONFIG_FILE").unwrap_or_else(|_| {
-        tracing::warn!("BROKER_CONFIG_FILE environment variable not set. Using default config file path.");
+        tracing::warn!(
+            "BROKER_CONFIG_FILE environment variable not set. Using default config file path."
+        );
         "./configs/broker_conf.yml".to_string()
     });
 

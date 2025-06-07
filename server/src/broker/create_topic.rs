@@ -23,18 +23,19 @@ pub async fn create_topic(
             None
         }
         result = async {
-            tracing::info!("Creating new topic: {:?}", topic);
+            tracing::info!("Creating {:?}", topic);
             if cluster_info.brokers.len() < topic.num_partitions as usize {
                 tracing::warn!(
                     "Not enough peers to create {} partitions.
-                        Topic will be created but will be under replicated. 
-                        Once more peers join, walrs will move partitions to them.",
+                    Topic will be created but will be under replicated. 
+                    Once more peers join, walrs will move partitions to them.",
                     topic.num_partitions
                 );
             }
             // step 1: for p partitions and r replication factor, we need (p * r) different partition writers
             // example: if p = 3 and r = 2, we need 6 partition writers
-            let potential_peers_for_topic: HashMap<String, usize> = find_peers_for_topic(&self_address, topic.num_partitions, &cluster_info);
+            let potential_peers_for_topic: HashMap<String, usize> =
+                find_peers_for_topic(&self_address, topic.num_partitions, &cluster_info);
             // step 2: create local partition writer for partition 0
             let local_partition_writer_cancellation_token = cancellation_token.child_token();
             let partition_zero = 0;
@@ -85,7 +86,10 @@ pub async fn create_topic(
     }
 }
 
-async fn send_request_to_peer(peer_address: &String, command: CommandToPeer) -> Option<PeerResponse> {
+async fn send_request_to_peer(
+    peer_address: &String,
+    command: CommandToPeer,
+) -> Option<PeerResponse> {
     let bytes = common::to_bytes(&command);
     match tokio::net::TcpStream::connect(peer_address).await {
         Ok(mut stream) => {
@@ -93,7 +97,11 @@ async fn send_request_to_peer(peer_address: &String, command: CommandToPeer) -> 
                 tracing::error!("Failed to send command to peer {}: {}", peer_address, e);
                 return None;
             }
-            tracing::info!("Command sent to peer {}, waiting for response", peer_address);
+            tracing::info!(
+                "Command sent to peer {}, waiting for response. Command: {:?}",
+                peer_address,
+                command
+            );
             common::read_command_from_socket::<PeerResponse>(&mut stream).await
         }
         Err(e) => {
@@ -124,18 +132,18 @@ async fn create_remote_lead_partitions(
             },
         };
         tracing::info!(
-            "Requesting peer {} to create lead partition for topic: {}, partition: {}",
+            "Requesting peer {} to create lead partition. Topic: {}, partition: {}",
             partition_leader_peer_address,
             topic_name,
-            partition_number + 1
+            partition_number
         );
         match send_request_to_peer(partition_leader_peer_address, command).await {
             Some(PeerResponse::PartitionWriterCreated) => {
                 tracing::info!(
-                    "Peer {} successfully created lead partition for topic: {}, partition: {}",
+                    "Peer {} successfully created lead partition. Topic: {}, partition: {}",
                     partition_leader_peer_address,
                     topic_name,
-                    partition_number + 1
+                    partition_number
                 );
                 let partition_info = PartitionInfo {
                     number: *partition_number as u8,
@@ -146,18 +154,18 @@ async fn create_remote_lead_partitions(
             }
             _ => {
                 tracing::error!(
-                    "Failed to request peer {} to create lead partition for topic: {}, partition: {}",
+                    "Failed to request peer {} to create lead partition. topic: {}, partition: {}",
                     partition_leader_peer_address,
                     topic_name,
-                    partition_number + 1
+                    partition_number
                 );
                 return Err(std::io::Error::new(
                     ErrorKind::Other,
                     format!(
-                        "Failed to create remote lead partition on peer {} for topic: {}, partition: {}",
+                        "Failed to create remote lead partition on peer {}. topic: {}, partition: {}",
                         partition_leader_peer_address,
                         topic_name,
-                        partition_number + 1
+                        partition_number
                     ),
                 ));
             }
@@ -184,14 +192,8 @@ fn find_peers_for_topic(
         .collect();
     peers_sorted_by_number_of_topics.sort_by_key(|&(topic_count, _)| topic_count);
 
-    tracing::info!(
-        "Peers sorted by number of topics: {:?}",
-        peers_sorted_by_number_of_topics
-    );
-
     let potential_peers: HashMap<String, usize> = peers_sorted_by_number_of_topics
         .iter()
-        .filter(|&(_, peer_address)| peer_address != self_address)
         .take(num_partitions as usize)
         .enumerate()
         .map(|(index, (_, peer_address))| (peer_address.clone(), index + 1))
@@ -208,35 +210,43 @@ pub async fn create_partition(
     local_data_dir_path: &String,
     cancellation_token: CancellationToken,
 ) -> Option<mpsc::Sender<PartitionCommand>> {
-    let (partition_writer_tx, partition_writer_rx) = mpsc::channel::<PartitionCommand>(MPSC_MAX_Q_SIZE);
-    let mut partition_writer = PartitionWriter::new(topic_name, partition_number, local_data_dir_path);
     tracing::info!(
-        "Starting {} partition {} for topic {}",
-        partition_role,
+        "Creating partition {} for topic: {}, role: {:?}",
         partition_number,
-        topic_name
+        topic_name,
+        partition_role
     );
+    let (partition_writer_tx, partition_writer_rx) =
+        mpsc::channel::<PartitionCommand>(MPSC_MAX_Q_SIZE);
+
+    let mut partition_writer =
+        PartitionWriter::new(topic_name, partition_number, local_data_dir_path);
+
     tokio::spawn(async move {
         partition_writer
             .start(partition_writer_rx, cancellation_token)
             .await;
     });
+
     match partition_role {
         PartitionRole::Leader { followers } => {
             tracing::info!(
-                "Created leader partition {} for topic: {}, followers: {:?}",
-                partition_number,
+                "Leader partition created for topic: {}, partition: {}, partition followers: {:?}",
                 topic_name,
+                partition_number,
                 followers
             );
+            let peers = followers.keys().cloned().collect::<Vec<String>>();
             let all_peers_created_followers =
-                create_partition_followers(&followers, &topic_name, &self_address).await;
+                create_partition_followers(&topic_name, partition_number, peers, &self_address)
+                    .await;
             if all_peers_created_followers {
                 Some(partition_writer_tx)
             } else {
                 tracing::error!(
-                    "Failed to request peers to create follower partitions for topic: {}",
-                    topic_name
+                    "Failed to request peers to create follower partitions. topic: {}, partition: {}",
+                    topic_name,
+                    partition_number
                 );
                 None
             }
@@ -254,79 +264,40 @@ pub async fn create_partition(
 }
 
 async fn create_partition_followers(
-    peers: &HashMap<String, usize>,
     topic_name: &String,
+    partition_number: u8,
+    peers: Vec<String>,
     self_address: &str,
 ) -> bool {
-    for (peer_address, partition_number) in peers {
-        let request_result = request_peer_to_create_follower_partitions(
-            peer_address,
-            topic_name,
-            (partition_number + 1) as u8, // partition numbers start from 0, so we add 1 to match the partition number
-            self_address.to_string(),
-        )
-        .await;
-        match request_result {
-            Ok(_) => {
+    for peer in peers {
+        let peer_command = CommandToPeer::CreatePartitionWriter {
+            topic_name: topic_name.clone(),
+            partition_number,
+            role: PartitionRole::Follower {
+                leader_address: self_address.to_string(),
+            },
+        };
+        match send_request_to_peer(&peer, peer_command).await {
+            Some(PeerResponse::PartitionWriterCreated) => {
                 tracing::info!(
-                    "Successfully requested peer {} to create partition writer for topic {} with partition number {}",
-                    peer_address,
+                    "Peer {} created follower partition for topic: {}, partition: {}",
+                    peer,
                     topic_name,
-                    partition_number + 1
+                    partition_number
                 );
-                continue;
             }
-            Err(e) => {
+            _ => {
                 tracing::error!(
-                    "Failed to request peer {} to create partition writer for topic {} with partition number {}: {}",
-                    peer_address,
+                    "Failed to request peer {} to create follower partition for topic: {}, partition: {}",
+                    peer,
                     topic_name,
-                    partition_number + 1,
-                    e
+                    partition_number
                 );
-                return false; // if any request fails, we return false
+                return false;
             }
         }
     }
     true
-}
-
-async fn request_peer_to_create_follower_partitions(
-    peer_address: &String,
-    topic_name: &String,
-    partition_number: u8,
-    self_address: String,
-) -> Result<(), std::io::Error> {
-    let peer_command = CommandToPeer::CreatePartitionWriter {
-        topic_name: topic_name.clone(),
-        partition_number,
-        role: PartitionRole::Follower {
-            leader_address: self_address,
-        },
-    };
-    tracing::info!(
-        "Requesting peer {} to create follower partition for topic: {}, partition number: {}",
-        peer_address,
-        topic_name,
-        partition_number
-    );
-    common::write_command_to_socket(peer_address, &peer_command).await
-        .map_err(|e| {
-            tracing::error!(
-                "Failed to send command to peer {}: {}",
-                peer_address,
-                e
-            );
-            e
-        })
-        .map(|_| {
-            tracing::info!(
-                "Successfully sent command to peer {} to create partition writer for topic {} with partition number {}",
-                peer_address,
-                topic_name,
-                partition_number
-            );
-        })
 }
 
 #[cfg(test)]

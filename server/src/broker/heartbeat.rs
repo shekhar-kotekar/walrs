@@ -107,7 +107,9 @@ mod tests {
             send_heartbeat(self_address_clone, cluster_info).await;
         });
 
-        let remote_listener = tokio::net::TcpListener::bind(&remote_address).await.unwrap();
+        let remote_listener = tokio::net::TcpListener::bind(&remote_address)
+            .await
+            .unwrap();
         tracing::debug!("Remote listener started on {}", remote_address);
         let mut remote_stream = remote_listener.accept().await.unwrap().0;
         tracing::debug!("Remote stream accepted from {}", remote_address);
@@ -122,7 +124,10 @@ mod tests {
                     } => {
                         tracing::debug!("Received heartbeat from peer: {}", peer_listener_address);
                         assert_eq!(peer_listener_address, self_address);
-                        assert_eq!(broker_status.registed_topics, vec!["test_topic".to_string()]);
+                        assert_eq!(
+                            broker_status.registed_topics,
+                            vec!["test_topic".to_string()]
+                        );
 
                         let response = PeerResponse::HeartbeatReceived;
                         let serialized_response = common::to_bytes(&response);

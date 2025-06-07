@@ -208,6 +208,7 @@ pub struct BrokerConfigBuilder {
 
 impl BrokerConfigBuilder {
     pub fn from_yaml_file(path: &str) -> Result<Self, String> {
+        tracing::info!("Reading config from file: {}", path);
         let file = std::fs::File::open(path)
             .map_err(|e| format!("Failed to open broker config YAML file: {}", e))?;
         let config: BrokerConfig = serde_yml::from_reader(file)

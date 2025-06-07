@@ -9,9 +9,11 @@ pub async fn start_peer_listener(
     broker_tx: mpsc::Sender<CommandToBroker>,
     cancellation_token: CancellationToken,
 ) {
-    let peer_listener = tokio::net::TcpListener::bind(&address).await.unwrap_or_else(|_| {
-        panic!("Failed to bind peer listener on address: {}", address);
-    });
+    let peer_listener = tokio::net::TcpListener::bind(&address)
+        .await
+        .unwrap_or_else(|_| {
+            panic!("Failed to bind peer listener on address: {}", address);
+        });
     tracing::info!("Peer listener started on {}", address);
 
     tokio::select! {
@@ -50,7 +52,12 @@ async fn handle_peer_request(
 
             let response: PeerResponse = match command {
                 Some(CommandToPeer::CreatePartitionWriter { topic_name, partition_number, role }) => {
-                    tracing::info!("Received create partition writer command from peer: {}", socket.peer_addr().unwrap());
+                    tracing::info!("Received create partition command from peer: {}, topic: {}, partition: {}, role: {:?}",
+                    socket.peer_addr().unwrap(),
+                    topic_name,
+                    partition_number,
+                    role);
+
                     let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerResponse>();
                     let broker_command = CommandToBroker::CreatePartitionWriter {
                         topic_name,
@@ -58,8 +65,9 @@ async fn handle_peer_request(
                         role,
                         broker_tx: broker_oneshot_tx,
                     };
+                    tracing::info!("forwarding request to broker.");
                     broker_tx.send(broker_command).await.expect("Failed to send create partition writer command to broker");
-
+                    tracing::info!("Waiting for broker response.");
                     match broker_rx.await {
                         Ok(BrokerResponse::PartitionWriterCreated) => PeerResponse::PartitionWriterCreated,
                         Ok(BrokerResponse::BrokerError { message }) => PeerResponse::Error {
@@ -95,6 +103,7 @@ async fn handle_peer_request(
                     message: "Failed to read command from socket".to_string(),
                 },
             };
+            tracing::info!("Sending response to peer: {}", socket.peer_addr().unwrap());
             socket
                 .write_all(&common::to_bytes(&response))
                 .await

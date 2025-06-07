@@ -46,14 +46,19 @@ pub fn from_bytes<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> T {
     bincode::deserialize(bytes).expect("Failed to deserialize value")
 }
 
-pub async fn read_command_from_socket<T: for<'de> Deserialize<'de>>(socket: &mut TcpStream) -> Option<T> {
+pub async fn read_command_from_socket<T: for<'de> Deserialize<'de>>(
+    socket: &mut TcpStream,
+) -> Option<T> {
     let mut buffer = BytesMut::with_capacity(1024);
     let bytes_read = socket.read_buf(&mut buffer).await.ok()?;
     tracing::debug!("Received {} bytes from socket", bytes_read);
     Some(from_bytes::<T>(&buffer))
 }
 
-pub async fn write_command_to_socket<T: Serialize>(remote_address: &str, command: &T) -> std::io::Result<()> {
+pub async fn write_command_to_socket<T: Serialize>(
+    remote_address: &str,
+    command: &T,
+) -> std::io::Result<()> {
     let bytes = to_bytes(command);
     let mut stream = TcpStream::connect(remote_address).await?;
     stream.write_all(&bytes).await?;

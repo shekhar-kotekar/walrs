@@ -26,7 +26,10 @@ impl PartitionWriter {
         mut main_rx: mpsc::Receiver<PartitionCommand>,
         cancellation_token: CancellationToken,
     ) {
-        tracing::info!("Starting partition writer for partition {}", self.partition_name);
+        tracing::info!(
+            "Starting partition writer for partition {}",
+            self.partition_name
+        );
 
         let partition_file_path = format!("{}/data.log", self.partition_path);
         tracing::info!("Partition data will be stored in {}", partition_file_path);
@@ -74,6 +77,9 @@ impl PartitionWriter {
                 }
             }
         }
-        tracing::info!("Partition writer for partition {} stopped.", self.partition_name);
+        tracing::info!(
+            "Partition writer for partition {} stopped.",
+            self.partition_name
+        );
     }
 }

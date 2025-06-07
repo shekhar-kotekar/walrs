@@ -100,7 +100,9 @@ impl Topic {
             return Err("Number of partitions must be at least 1".to_string());
         }
         if self.replication_factor < 1 || self.replication_factor > self.num_partitions {
-            return Err("Replication factor must be between 1 and the number of partitions".to_string());
+            return Err(
+                "Replication factor must be between 1 and the number of partitions".to_string(),
+            );
         }
         if self.retention_period_minutes == 0 {
             return Err("Retention period must be greater than 0".to_string());
@@ -117,17 +119,31 @@ impl Topic {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ClusterResponse {
-    TopicCreated { topic_metadata: TopicMetadata },
+    TopicCreated {
+        topic_metadata: TopicMetadata,
+    },
     TopicAlreadyExists,
     TopicNotFound,
-    InternalError { message: String },
+    InternalError {
+        message: String,
+    },
     ConnectionAccepted,
-    ConnectionRejected { reason: String },
-    MessagesPersisted { count: u8 },
+    ConnectionRejected {
+        reason: String,
+    },
+    MessagesPersisted {
+        count: u8,
+    },
     ConsumerResponse(ConsumerResponse),
-    Success { message: String },
-    TopicMetadata { metadata: TopicMetadata },
-    PartitionLeaders { leaders: HashMap<String, Vec<String>> },
+    Success {
+        message: String,
+    },
+    TopicMetadata {
+        metadata: TopicMetadata,
+    },
+    PartitionLeaders {
+        leaders: HashMap<String, Vec<String>>,
+    },
 }
 
 impl ClusterResponse {

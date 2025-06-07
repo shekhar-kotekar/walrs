@@ -11,7 +11,8 @@ impl Encoder<ClusterResponse> for BrokerResponseCodec {
     type Error = std::io::Error;
 
     fn encode(&mut self, item: ClusterResponse, buf: &mut BytesMut) -> Result<(), Self::Error> {
-        let encoded_response = bincode::serialize(&item).map_err(|e| Error::new(ErrorKind::Other, e))?;
+        let encoded_response =
+            bincode::serialize(&item).map_err(|e| Error::new(ErrorKind::Other, e))?;
         buf.put_u32(encoded_response.len() as u32);
         buf.extend_from_slice(&encoded_response);
         Ok(())
@@ -35,7 +36,8 @@ impl Decoder for BrokerResponseCodec {
         buffer.advance(4);
 
         let encoded = buffer.split_to(len);
-        let response = bincode::deserialize(&encoded).map_err(|e| Error::new(ErrorKind::Other, e))?;
+        let response =
+            bincode::deserialize(&encoded).map_err(|e| Error::new(ErrorKind::Other, e))?;
         Ok(Some(response))
     }
 }
@@ -73,7 +75,9 @@ mod tests {
 
         // Encode the response
         let mut buf = BytesMut::new();
-        codec.encode(response.clone(), &mut buf).expect("Encoding failed");
+        codec
+            .encode(response.clone(), &mut buf)
+            .expect("Encoding failed");
 
         // Decode the response
         let decoded = codec.decode(&mut buf).expect("Decoding failed");
