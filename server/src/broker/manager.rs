@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use common::models::TopicMetadata;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -90,6 +90,7 @@ impl Broker {
                                 tracing::error!("Failed to create topic: {:?}", topic);
                             }
                         }
+                        CommandToBroker::Heartbeat { sender_address, sender_status, broker_tx } => self.update_cluster_info(&sender_address, sender_status, broker_tx).await,
                         _ => {
                             tracing::info!("Command not implemented (yet): {:?}", command);
                         }
@@ -107,5 +108,18 @@ impl Broker {
             }
         }
         tracing::info!("Broker stopped: {}", self.address);
+    }
+
+    async fn update_cluster_info(
+        &mut self,
+        peer_address: &str,
+        peer_status: BrokerInfo,
+        broker_tx: oneshot::Sender<BrokerResponse>,
+    ) {
+        tracing::info!("heartbeat received: {:?}", peer_status);
+        self.cluster_info
+            .brokers
+            .insert(peer_address.to_string(), peer_status.clone());
+        let _ = broker_tx.send(BrokerResponse::HeartbeatReceived);
     }
 }
