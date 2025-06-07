@@ -53,7 +53,6 @@ pub enum PartitionWriterRole {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TopicMetadata {
-    pub id: u64,
     pub name: String,
     pub replication_factor: u8,
     pub retention_period_minutes: u16,
@@ -64,7 +63,6 @@ pub struct TopicMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PartitionInfo {
     pub number: u8,
-    pub role: PartitionWriterRole,
     pub leader_address: String,
     pub follower_addresses: Vec<String>,
 }
@@ -119,7 +117,7 @@ impl Topic {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ClusterResponse {
-    TopicCreated { partition_leaders: HashMap<u8, String> },
+    TopicCreated { topic_metadata: TopicMetadata },
     TopicAlreadyExists,
     TopicNotFound,
     InternalError { message: String },

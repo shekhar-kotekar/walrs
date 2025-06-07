@@ -42,7 +42,6 @@ impl Decoder for BrokerResponseCodec {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
 
     use super::*;
     use bytes::BytesMut;
@@ -52,7 +51,24 @@ mod tests {
     fn test_broker_response_codec_encode_decode() {
         let mut codec = BrokerResponseCodec;
         let response = ClusterResponse::TopicCreated {
-            partition_leaders: HashMap::from([(1, "127.0.0.1:5056".to_string())]),
+            topic_metadata: crate::models::TopicMetadata {
+                name: "test_topic".to_string(),
+                replication_factor: 2,
+                retention_period_minutes: 60,
+                ack_level: crate::models::AckLevel::Leader,
+                partitions: vec![
+                    crate::models::PartitionInfo {
+                        number: 0,
+                        leader_address: "broker1".to_string(),
+                        follower_addresses: vec!["broker1".to_string(), "broker2".to_string()],
+                    },
+                    crate::models::PartitionInfo {
+                        number: 1,
+                        leader_address: "broker2".to_string(),
+                        follower_addresses: vec!["broker2".to_string(), "broker3".to_string()],
+                    },
+                ],
+            },
         };
 
         // Encode the response

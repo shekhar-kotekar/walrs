@@ -6,7 +6,7 @@ async fn send_heartbeat_to_peer(peer: &str, serialized_heartbeat: &[u8]) -> bool
     match tokio::net::TcpStream::connect(peer).await {
         Ok(mut stream) => {
             tracing::debug!("Sending heartbeat to peer: {}", peer);
-            if let Err(e) = stream.write_all(&serialized_heartbeat).await {
+            if let Err(e) = stream.write_all(serialized_heartbeat).await {
                 tracing::error!("Failed to send heartbeat to {}: {}", peer, e);
                 return false;
             }
@@ -42,8 +42,8 @@ pub async fn send_heartbeat(self_address: String, cluster_info: ClusterInfo) {
             let peers: Vec<String> = cluster_info
                 .brokers
                 .keys()
+                .filter(|&peer| peer != &self_address)
                 .cloned()
-                .filter(|peer| peer != &self_address)
                 .collect();
             let message_to_peer: CommandToPeer = CommandToPeer::Heartbeat {
                 peer_listener_address: self_address.clone(),
@@ -89,7 +89,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    // #[ignore]
+    #[ignore]
     #[traced_test]
     async fn test_send_heartbeat() {
         let mut cluster_info = ClusterInfo::new();

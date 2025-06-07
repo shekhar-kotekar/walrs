@@ -6,16 +6,16 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub enum BrokerRole {
-    Leader,
+pub enum PartitionRole {
+    Leader { followers: HashMap<String, usize> },
     Follower { leader_address: String },
 }
 
-impl Display for BrokerRole {
+impl Display for PartitionRole {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BrokerRole::Leader => write!(f, "leader"),
-            BrokerRole::Follower { leader_address: _ } => write!(f, "follower"),
+            PartitionRole::Leader { followers: _ } => write!(f, "leader"),
+            PartitionRole::Follower { leader_address: _ } => write!(f, "follower"),
         }
     }
 }
@@ -25,7 +25,7 @@ pub enum CommandToPeer {
     CreatePartitionWriter {
         topic_name: String,
         partition_number: u8,
-        role: BrokerRole,
+        role: PartitionRole,
     },
     Heartbeat {
         peer_listener_address: String,
@@ -109,14 +109,13 @@ impl ClusterInfo {
 pub enum CommandToBroker {
     CreateNewTopic {
         topic: Topic,
-        broker_role: BrokerRole,
         broker_tx: oneshot::Sender<BrokerResponse>,
     },
     CreatePartitionWriter {
         topic_name: String,
         partition_number: u8,
         broker_tx: oneshot::Sender<BrokerResponse>,
-        role: BrokerRole,
+        role: PartitionRole,
     },
     GetPartitionWriter {
         topic_name: String,
@@ -148,7 +147,7 @@ pub enum CommandToBroker {
 #[derive(Debug)]
 pub enum BrokerResponse {
     TopicCreated {
-        partition_leaders: HashMap<u8, String>,
+        topic_metadata: common::models::TopicMetadata,
     },
     PartitionWriterCreated,
     TopicAlreadyExists,
@@ -172,8 +171,8 @@ pub enum BrokerResponse {
 impl BrokerResponse {
     pub fn to_cluster_response(&self) -> ClusterResponse {
         match self {
-            BrokerResponse::TopicCreated { partition_leaders } => ClusterResponse::TopicCreated {
-                partition_leaders: partition_leaders.clone(),
+            BrokerResponse::TopicCreated { topic_metadata } => ClusterResponse::TopicCreated {
+                topic_metadata: topic_metadata.clone(),
             },
             BrokerResponse::TopicAlreadyExists => ClusterResponse::TopicAlreadyExists,
             BrokerResponse::BrokerError { message } => ClusterResponse::InternalError {

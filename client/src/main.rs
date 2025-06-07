@@ -35,11 +35,8 @@ async fn main() {
     };
     let sent_messages = vec![first_message, second_message];
     let received_messages: Vec<Message> = match admin.create_topic(command) {
-        ClusterResponse::TopicCreated { partition_leaders } => {
-            tracing::info!(
-                "Topic created successfully. Partition leaders: {:?}",
-                partition_leaders
-            );
+        ClusterResponse::TopicCreated { topic_metadata } => {
+            tracing::info!("Topic created successfully. Metadata: {:?}", topic_metadata);
             send_messages(topic_name, sent_messages.clone());
             // read_messages(topic_name, admin.brokers.clone()).await
             Vec::new() // Temporarily returning an empty vector to avoid compilation error

@@ -1,9 +1,12 @@
-use tokio::sync::mpsc::Receiver;
+use std::collections::HashMap;
+
+use common::models::TopicMetadata;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    broker::{create_topic::create_topic, heartbeat},
-    models::{BrokerInfo, ClusterInfo, CommandToBroker},
+    broker::{create_topic, heartbeat},
+    models::{BrokerInfo, BrokerResponse, ClusterInfo, CommandToBroker, PartitionCommand},
 };
 
 pub struct Broker {
@@ -11,6 +14,8 @@ pub struct Broker {
     data_dir_path: String,
     address: String,
     heartbeat_interval: tokio::time::Interval,
+    local_partition_writers: HashMap<String, mpsc::Sender<PartitionCommand>>,
+    topic_metadata: HashMap<String, TopicMetadata>,
 }
 
 impl Broker {
@@ -48,33 +53,42 @@ impl Broker {
             data_dir_path,
             address: self_address,
             heartbeat_interval,
+            local_partition_writers: HashMap::new(),
+            topic_metadata: HashMap::new(),
         }
     }
     pub async fn start(
         &mut self,
-        mut command_rx: Receiver<CommandToBroker>,
+        mut command_rx: mpsc::Receiver<CommandToBroker>,
         cancellation_token: CancellationToken,
     ) {
         loop {
             tokio::select! {
                 Some(command) = command_rx.recv() => {
                     match command {
-                        CommandToBroker::CreateNewTopic { topic, broker_role, broker_tx } => {
+                        CommandToBroker::CreateNewTopic { topic, broker_tx } => {
                             tracing::info!("Received command to create new topic: {:?}", topic);
-                            let cluster_info = self.cluster_info.clone();
-                            let self_address = self.address.clone();
-                            let broker_data_dir_path = self.data_dir_path.clone();
-                            let topic_cancellation_token = cancellation_token.child_token();
-                            tokio::spawn(async move {
-                                create_topic(
-                                    topic,
-                                    self_address,
-                                    broker_data_dir_path,
-                                    broker_role,
-                                    cluster_info,
-                                    topic_cancellation_token,
-                                ).await;
-                            });
+                            let result: Option<(mpsc::Sender<PartitionCommand>, TopicMetadata)> = create_topic::create_topic(
+                                topic.clone(),
+                                self.address.clone(),
+                                self.data_dir_path.clone(),
+                                self.cluster_info.clone(),
+                                cancellation_token.clone(),
+                            ).await;
+                            if result.is_some() {
+                                tracing::info!("Topic created successfully: {:?}", topic);
+                                let (partition_zero_writer, topic_metadata) = result.unwrap();
+                                self.local_partition_writers.insert(topic.name.clone(), partition_zero_writer);
+                                let broker_response = BrokerResponse::TopicCreated {
+                                    topic_metadata: topic_metadata.clone(),
+                                };
+                                self.topic_metadata.insert(topic.name.clone(), topic_metadata);
+                                broker_tx.send(broker_response).unwrap_or_else(|e| {
+                                    tracing::error!("Failed to send broker response: {:?}", e);
+                                });
+                            } else {
+                                tracing::error!("Failed to create topic: {:?}", topic);
+                            }
                         }
                         _ => {
                             tracing::info!("Command not implemented (yet): {:?}", command);

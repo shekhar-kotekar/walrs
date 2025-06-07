@@ -46,7 +46,7 @@ async fn handle_peer_request(
             tracing::info!("Peer request handler cancelled.");
         }
         _ = async {
-            let command = common::read_command_from_socket(&mut socket).await;
+            let command = common::read_command_from_socket::<CommandToPeer>(&mut socket).await;
 
             let response: PeerResponse = match command {
                 Some(CommandToPeer::CreatePartitionWriter { topic_name, partition_number, role }) => {

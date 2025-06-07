@@ -35,6 +35,7 @@ In one console execute below to run one walrs server in local
 
 ```
 export POD_IP=127.0.0.1
+export BROKER_CONFIG_FILE=./server/configs/<broker_number_conf>.yml
 make run_server
 ```
 

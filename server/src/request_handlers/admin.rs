@@ -1,7 +1,7 @@
 use common::models::{ClientCommand, ClusterResponse};
 use tokio::net::TcpStream;
 
-use crate::models::{BrokerResponse, BrokerRole, CommandToBroker};
+use crate::models::{BrokerResponse, CommandToBroker};
 use crate::request_handlers::commons;
 
 pub async fn handle_admin_request(
@@ -17,7 +17,6 @@ pub async fn handle_admin_request(
                 let (broker_oneshot_tx, broker_rx) = tokio::sync::oneshot::channel::<BrokerResponse>();
                 let broker_command: CommandToBroker = CommandToBroker::CreateNewTopic {
                     topic: topic_details,
-                    broker_role: BrokerRole::Leader,
                     broker_tx: broker_oneshot_tx,
                 };
                 broker_tx.send(broker_command).await.unwrap();
