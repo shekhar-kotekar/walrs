@@ -9,7 +9,7 @@ use common::{
 async fn main() {
     common::init_tracing(None);
     let admin = ClusterAdmin {
-        brokers: vec!["127.0.0.1:5056".into(), "broker2:9092".into()],
+        brokers: vec!["127.0.0.1:5056".into(), "127.0.0.1:5058".into()],
     };
     let topic_name: &str = "my_new_topic";
 
