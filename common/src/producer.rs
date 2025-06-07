@@ -55,9 +55,9 @@ impl Producer {
                         self.message_batch_codec
                             .encode(message_batch.clone(), &mut buf)
                             .expect("Encoding failed for messages being sent.");
-                        stream
-                            .write_all(&buf)
-                            .unwrap_or_else(|_| tracing::error!("Failed to write message batch to broker: {}", broker));
+                        stream.write_all(&buf).unwrap_or_else(|_| {
+                            tracing::error!("Failed to write message batch to broker: {}", broker)
+                        });
                     }
                     stream.flush().unwrap();
                     tracing::debug!("Messages sent to broker: {}", broker);
@@ -97,7 +97,10 @@ impl Producer {
         messages_grouped_by_brokers
     }
 
-    fn get_partition_leaders_for_topics(&mut self, stream: &mut TcpStream) -> Option<HashMap<String, Vec<String>>> {
+    fn get_partition_leaders_for_topics(
+        &mut self,
+        stream: &mut TcpStream,
+    ) -> Option<HashMap<String, Vec<String>>> {
         let command_to_get_leaders = ClientCommand::GetPartitionLeaders {
             topics: self.buffer.keys().cloned().collect(),
         };
@@ -205,11 +208,15 @@ mod should {
         producer.send("topic1".to_string(), &message_2);
         producer.send("topic1".to_string(), &message_3);
 
-        let grouped_messages = producer
-            .group_messages_by_brokers(producer.brokers.clone(), producer.buffer.get("topic1").unwrap().clone());
+        let grouped_messages = producer.group_messages_by_brokers(
+            producer.brokers.clone(),
+            producer.buffer.get("topic1").unwrap().clone(),
+        );
         tracing::debug!("Grouped messages: {:?}", grouped_messages);
         assert_eq!(grouped_messages.len(), 2);
-        assert!(grouped_messages.contains_key("broker_1:9092") || grouped_messages.contains_key("broker_2:9092"));
+        assert!(
+            grouped_messages.contains_key("broker_1:9092") || grouped_messages.contains_key("broker_2:9092")
+        );
     }
 
     #[test]

@@ -14,14 +14,16 @@ async fn main() {
     let topic_name: &str = "my_new_topic";
 
     let replication_factor: u8 = 2;
+    let topic_to_create = Topic::new(
+        topic_name.to_string(),
+        Some(2), // number of partitions
+        Some(replication_factor),
+        Some(10),               // retention time in minutes
+        Some(AckLevel::Leader), // ack level
+    )
+    .unwrap();
     let command = ClientCommand::CreateTopic {
-        topic_details: Topic::new(
-            topic_name.to_string(),
-            Some(2),
-            Some(replication_factor),
-            Some(48),
-            Some(AckLevel::Leader),
-        ),
+        topic_details: topic_to_create,
     };
     let first_message = Message {
         key: Some("key1".to_string()),
@@ -34,7 +36,10 @@ async fn main() {
     let sent_messages = vec![first_message, second_message];
     let received_messages: Vec<Message> = match admin.create_topic(command) {
         ClusterResponse::TopicCreated { partition_leaders } => {
-            tracing::info!("Topic created successfully. Partition leaders: {:?}", partition_leaders);
+            tracing::info!(
+                "Topic created successfully. Partition leaders: {:?}",
+                partition_leaders
+            );
             send_messages(topic_name, sent_messages.clone());
             // read_messages(topic_name, admin.brokers.clone()).await
             Vec::new() // Temporarily returning an empty vector to avoid compilation error

@@ -36,7 +36,12 @@ impl PartitionWriter {
             .append(true)
             .open(partition_file_path)
             .await
-            .unwrap_or_else(|_| panic!("Failed to open partition file for partition: {}", self.partition_name));
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Failed to open partition file for partition: {}",
+                    self.partition_name
+                )
+            });
 
         loop {
             tokio::select! {

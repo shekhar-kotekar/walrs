@@ -1,15 +1,31 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 
-use common::models::{ClusterResponse, Message, PartitionWriterRole, Topic};
+use common::models::{ClusterResponse, Message, Topic};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub enum BrokerRole {
+    Leader,
+    Follower { leader_address: String },
+}
+
+impl Display for BrokerRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BrokerRole::Leader => write!(f, "leader"),
+            BrokerRole::Follower { leader_address: _ } => write!(f, "follower"),
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum CommandToPeer {
     CreatePartitionWriter {
         topic_name: String,
         partition_number: u8,
-        role: PartitionWriterRole,
+        role: BrokerRole,
     },
     Heartbeat {
         peer_listener_address: String,
@@ -62,15 +78,14 @@ impl BrokerInfo {
 
 #[derive(Debug, Clone)]
 pub struct ClusterInfo {
+    // key: broker address, value: BrokerInfo
     pub brokers: HashMap<String, BrokerInfo>,
-    pub topics_in_cluster: HashMap<String, common::models::TopicMetadata>,
 }
 
 impl ClusterInfo {
     pub fn new() -> Self {
         Self {
             brokers: HashMap::new(),
-            topics_in_cluster: HashMap::new(),
         }
     }
     pub fn with_peers(mut self, peers: Vec<String>) -> Self {
@@ -94,13 +109,14 @@ impl ClusterInfo {
 pub enum CommandToBroker {
     CreateNewTopic {
         topic: Topic,
+        broker_role: BrokerRole,
         broker_tx: oneshot::Sender<BrokerResponse>,
     },
     CreatePartitionWriter {
         topic_name: String,
         partition_number: u8,
         broker_tx: oneshot::Sender<BrokerResponse>,
-        role: PartitionWriterRole,
+        role: BrokerRole,
     },
     GetPartitionWriter {
         topic_name: String,
@@ -193,9 +209,10 @@ pub struct BrokerConfigBuilder {
 
 impl BrokerConfigBuilder {
     pub fn from_yaml_file(path: &str) -> Result<Self, String> {
-        let file = std::fs::File::open(path).map_err(|e| format!("Failed to open broker config YAML file: {}", e))?;
-        let config: BrokerConfig =
-            serde_yml::from_reader(file).map_err(|e| format!("Failed to read broker config from YAML file: {}", e))?;
+        let file = std::fs::File::open(path)
+            .map_err(|e| format!("Failed to open broker config YAML file: {}", e))?;
+        let config: BrokerConfig = serde_yml::from_reader(file)
+            .map_err(|e| format!("Failed to read broker config from YAML file: {}", e))?;
         Ok(Self {
             ip: None,
             port: config.port,

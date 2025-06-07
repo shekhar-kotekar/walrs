@@ -17,7 +17,11 @@ async fn send_heartbeat_to_peer(peer: &str, serialized_heartbeat: &[u8]) -> bool
                     return true;
                 }
                 Some(PeerResponse::Error { message }) => {
-                    tracing::error!("Error response for heartbeat signal from peer {}: {}", peer, message);
+                    tracing::error!(
+                        "Error response for heartbeat signal from peer {}: {}",
+                        peer,
+                        message
+                    );
                 }
                 _ => {
                     tracing::error!("Failed to read response from peer: {}", peer);
@@ -69,7 +73,10 @@ pub async fn send_heartbeat(self_address: String, cluster_info: ClusterInfo) {
                 );
             }
         }
-        None => tracing::error!("Broker {} not found in cluster info, Heartbeat not sent.", self_address),
+        None => tracing::error!(
+            "Broker {} not found in cluster info, Heartbeat not sent.",
+            self_address
+        ),
     }
 }
 

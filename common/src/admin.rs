@@ -17,7 +17,10 @@ impl ClusterAdmin {
 
         match authenticator::authenticate(&mut stream, crate::models::ClientType::Admin) {
             Some(ClusterResponse::ConnectionAccepted) => {
-                tracing::info!("Authentication successful. Sending request to {}", &self.brokers[0]);
+                tracing::info!(
+                    "Authentication successful. Sending request to {}",
+                    &self.brokers[0]
+                );
 
                 let serialized_command = bincode::serialize(&command).unwrap();
                 stream.write_all(&serialized_command).unwrap();

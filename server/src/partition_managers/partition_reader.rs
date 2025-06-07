@@ -25,7 +25,10 @@ impl PartitionReader {
         }
     }
 
-    async fn read_messages_from_file(&mut self, reader: &mut tokio::io::BufReader<tokio::fs::File>) -> Vec<Message> {
+    async fn read_messages_from_file(
+        &mut self,
+        reader: &mut tokio::io::BufReader<tokio::fs::File>,
+    ) -> Vec<Message> {
         let mut messages = Vec::new();
         let mut buf = String::new();
 

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use tokio::io::AsyncWriteExt;
 use tracing_subscriber::fmt::format::FmtSpan;
 pub mod admin;
 mod authenticator;
@@ -50,4 +51,47 @@ pub async fn read_command_from_socket<T: for<'de> Deserialize<'de>>(socket: &mut
     let bytes_read = socket.read_buf(&mut buffer).await.ok()?;
     tracing::debug!("Received {} bytes from socket", bytes_read);
     Some(from_bytes::<T>(&buffer))
+}
+
+pub async fn write_command_to_socket<T: Serialize>(remote_address: &str, command: &T) -> std::io::Result<()> {
+    let bytes = to_bytes(command);
+    let mut stream = TcpStream::connect(remote_address).await?;
+    stream.write_all(&bytes).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::models::ClientCommand;
+    use tokio::net::TcpListener;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_send_and_receive_command_over_socket() {
+        let command = ClientCommand::RequestToConnect {
+            client_type: models::ClientType::Admin,
+        };
+        let remote_address = "127.0.0.1:8080";
+        let listener = TcpListener::bind(remote_address).await.unwrap();
+
+        let join_handle = tokio::spawn(async move {
+            let _ = write_command_to_socket(remote_address, &command).await;
+        });
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let response: Option<ClientCommand> = read_command_from_socket(&mut stream).await;
+        assert!(response.is_some());
+        if let Some(actual_command) = response {
+            assert_eq!(
+                actual_command,
+                ClientCommand::RequestToConnect {
+                    client_type: models::ClientType::Admin,
+                }
+            );
+        } else {
+            panic!("Failed to receive command");
+        }
+        join_handle.await.unwrap();
+    }
 }

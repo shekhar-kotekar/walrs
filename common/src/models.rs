@@ -4,8 +4,13 @@ use std::{collections::HashMap, io::Read, net::TcpStream};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ProducerCommand {
-    WriteMessages { topic_name: String, messages: Vec<Message> },
-    GetPartitionLeaders { topics: Vec<String> },
+    WriteMessages {
+        topic_name: String,
+        messages: Vec<Message>,
+    },
+    GetPartitionLeaders {
+        topics: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -80,14 +85,35 @@ impl Topic {
         replication_factor: Option<u8>,
         retention_period_minutes: Option<u16>,
         ack_level: Option<AckLevel>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, String> {
+        let new_topic = Self {
             name,
             num_partitions: num_partitions.unwrap_or(3),
             replication_factor: replication_factor.unwrap_or(3),
             retention_period_minutes: retention_period_minutes.unwrap_or(60),
             ack_level: ack_level.unwrap_or(AckLevel::Leader),
+        };
+        new_topic.check_constraints().unwrap();
+        Ok(new_topic)
+    }
+
+    fn check_constraints(&self) -> Result<(), String> {
+        if self.num_partitions < 1 {
+            return Err("Number of partitions must be at least 1".to_string());
         }
+        if self.replication_factor < 1 || self.replication_factor > self.num_partitions {
+            return Err("Replication factor must be between 1 and the number of partitions".to_string());
+        }
+        if self.retention_period_minutes == 0 {
+            return Err("Retention period must be greater than 0".to_string());
+        }
+        if self.name.is_empty() {
+            return Err("Topic name cannot be empty".to_string());
+        }
+        if self.name.len() > 25 {
+            return Err("Topic name cannot exceed 25 characters".to_string());
+        }
+        Ok(())
     }
 }
 

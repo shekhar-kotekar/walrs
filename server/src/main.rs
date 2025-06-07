@@ -130,7 +130,10 @@ async fn validate_client_request_to_connect(client_type: &ClientType, socket: &m
         ClientType::Consumer { topic_name: _ } => ClusterResponse::ConnectionAccepted,
         ClientType::Admin => ClusterResponse::ConnectionAccepted,
     };
-    socket.write_all(&bincode::serialize(&response).unwrap()).await.unwrap();
+    socket
+        .write_all(&bincode::serialize(&response).unwrap())
+        .await
+        .unwrap();
 }
 
 async fn process_client_request(
