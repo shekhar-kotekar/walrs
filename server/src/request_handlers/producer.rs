@@ -24,14 +24,14 @@ pub async fn handle_producer_request(
                 broker_tx.send(broker_command).await.unwrap();
                 match broker_rx.await {
                     Ok(response) => response.to_cluster_response(),
-                    Err(e) => ClusterResponse::InternalError {
+                    Err(e) => ClusterResponse::Error {
                         message: format!("Error details: {:?}", e),
                     },
                 }
             }
             _ => {
                 tracing::error!("Invalid command received from producer");
-                ClusterResponse::InternalError {
+                ClusterResponse::Error {
                     message: "Invalid command received".to_string(),
                 }
             }

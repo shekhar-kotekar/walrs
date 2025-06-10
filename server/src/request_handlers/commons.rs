@@ -29,13 +29,13 @@ pub async fn handle_get_topic_metadata_request(
                 ClusterResponse::TopicMetadata { metadata }
             }
             BrokerResponse::TopicNotFound => ClusterResponse::TopicNotFound,
-            _ => ClusterResponse::InternalError {
+            _ => ClusterResponse::Error {
                 message: "Unexpected response from broker".to_string(),
             },
         },
         Err(e) => {
             tracing::error!("Error receiving response from broker: {:?}", e);
-            ClusterResponse::InternalError {
+            ClusterResponse::Error {
                 message: "Failed to get topic metadata".to_string(),
             }
         }

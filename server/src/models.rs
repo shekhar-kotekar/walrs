@@ -166,6 +166,9 @@ pub enum BrokerResponse {
     PartitionLeaders {
         partition_leaders: HashMap<String, Vec<String>>,
     },
+    RequestInProgress {
+        request_id: u64,
+    },
 }
 
 impl BrokerResponse {
@@ -175,10 +178,15 @@ impl BrokerResponse {
                 topic_metadata: topic_metadata.clone(),
             },
             BrokerResponse::TopicAlreadyExists => ClusterResponse::TopicAlreadyExists,
-            BrokerResponse::BrokerError { message } => ClusterResponse::InternalError {
+            BrokerResponse::RequestInProgress { request_id } => {
+                ClusterResponse::RequestInProgress {
+                    request_id: *request_id,
+                }
+            }
+            BrokerResponse::BrokerError { message } => ClusterResponse::Error {
                 message: message.clone(),
             },
-            _ => ClusterResponse::InternalError {
+            _ => ClusterResponse::Error {
                 message: "Unknown broker response".to_string(),
             },
         }

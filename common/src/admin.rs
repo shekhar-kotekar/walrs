@@ -32,14 +32,14 @@ impl ClusterAdmin {
                 if let Some(response) = broker_response {
                     response
                 } else {
-                    ClusterResponse::InternalError {
+                    ClusterResponse::Error {
                         message: "Failed to deserialize broker response".to_string(),
                     }
                 }
             }
             _ => {
                 tracing::error!("Failed to authenticate admin request");
-                ClusterResponse::InternalError {
+                ClusterResponse::Error {
                     message: "Failed to authenticate admin request".to_string(),
                 }
             }

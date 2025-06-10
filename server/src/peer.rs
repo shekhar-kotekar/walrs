@@ -67,7 +67,7 @@ async fn handle_peer_request(
                     };
                     tracing::info!("forwarding request to broker.");
                     broker_tx.send(broker_command).await.expect("Failed to send create partition writer command to broker");
-                    tracing::info!("Waiting for broker response.");
+
                     match broker_rx.await {
                         Ok(BrokerResponse::PartitionWriterCreated) => PeerResponse::PartitionWriterCreated,
                         Ok(BrokerResponse::BrokerError { message }) => PeerResponse::Error {

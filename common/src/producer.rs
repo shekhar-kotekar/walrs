@@ -39,7 +39,7 @@ impl Producer {
                     match self.get_partition_leaders_for_topics(&mut stream) {
                         Some(leaders) => leaders,
                         None => {
-                            return ClusterResponse::InternalError {
+                            return ClusterResponse::Error {
                                 message: "Failed to get partition leaders.".to_string(),
                             }
                         }
@@ -117,7 +117,7 @@ impl Producer {
 
         match ClusterResponse::deserialize(stream).unwrap() {
             ClusterResponse::PartitionLeaders { leaders } => Some(leaders),
-            ClusterResponse::InternalError { message } => {
+            ClusterResponse::Error { message } => {
                 tracing::error!("Failed to get partition leaders: {}", message);
                 None
             }

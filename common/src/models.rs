@@ -25,6 +25,7 @@ pub enum ClientCommand {
     RequestToConnect { client_type: ClientType },
     GetTopicMetadata { topic_name: String },
     GetPartitionLeaders { topics: Vec<String> },
+    GetStatus { request_id: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -124,7 +125,7 @@ pub enum ClusterResponse {
     },
     TopicAlreadyExists,
     TopicNotFound,
-    InternalError {
+    Error {
         message: String,
     },
     ConnectionAccepted,
@@ -143,6 +144,9 @@ pub enum ClusterResponse {
     },
     PartitionLeaders {
         leaders: HashMap<String, Vec<String>>,
+    },
+    RequestInProgress {
+        request_id: u64,
     },
 }
 

@@ -27,6 +27,7 @@ mod models;
 mod partition_managers;
 mod peer;
 mod request_handlers;
+mod topic_managers;
 
 // TODO: Read all the constants from a config file
 const MPSC_MAX_Q_SIZE: usize = 100;
@@ -42,7 +43,7 @@ async fn main() {
     //     tracing::warn!("Console subscriber initialized.");
     // }
     // init_tracing_with_console();
-    common::init_tracing(Some(tracing::Level::DEBUG));
+    common::init_tracing(Some(tracing::Level::INFO));
     let pod_ip: String = std::env::var("POD_IP").expect("POD_IP environment variable not set.");
 
     let task_tracker = TaskTracker::new();
@@ -153,7 +154,7 @@ async fn process_client_request(
     tokio::select! {
         _ = cancellation_token.cancelled() => {
             tracing::info!("Cancellation token called. Stopping processing request.");
-            let internal_server_error = ClusterResponse::InternalError {
+            let internal_server_error = ClusterResponse::Error {
                 message: "Request processing was cancelled".to_string(),
             };
             socket.write_all(&bincode::serialize(&internal_server_error).unwrap()).await.unwrap();
@@ -181,7 +182,7 @@ async fn process_client_request(
                         }
                         _ => {
                             tracing::warn!("Unknown client command: {:?}", command);
-                            ClusterResponse::InternalError {
+                            ClusterResponse::Error {
                                 message: "Unknown client command".to_string(),
                             }
                         }
@@ -189,7 +190,7 @@ async fn process_client_request(
                 }
                 None => {
                     tracing::error!("Failed to deserialize client command");
-                    ClusterResponse::InternalError {
+                    ClusterResponse::Error {
                         message: "Failed to deserialize client command".to_string(),
                     }
                 }

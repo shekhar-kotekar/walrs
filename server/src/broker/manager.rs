@@ -1,15 +1,14 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use common::models::TopicMetadata;
-use tokio::{
-    sync::{mpsc, oneshot},
-    task::JoinHandle,
-};
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    broker::{create_topic, heartbeat},
+    broker::heartbeat,
     models::{BrokerInfo, BrokerResponse, ClusterInfo, CommandToBroker, PartitionCommand},
+    topic_managers::create_topic::{self, TopicManagerResponse},
+    MPSC_MAX_Q_SIZE,
 };
 
 pub struct Broker {
@@ -19,6 +18,7 @@ pub struct Broker {
     heartbeat_interval: tokio::time::Interval,
     local_partition_writers: HashMap<String, mpsc::Sender<PartitionCommand>>,
     topic_metadata: HashMap<String, TopicMetadata>,
+    handeled_request_count: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl Broker {
@@ -59,6 +59,7 @@ impl Broker {
             heartbeat_interval,
             local_partition_writers: HashMap::new(),
             topic_metadata: HashMap::new(),
+            handeled_request_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
     pub async fn start(
@@ -66,8 +67,25 @@ impl Broker {
         mut command_rx: mpsc::Receiver<CommandToBroker>,
         cancellation_token: CancellationToken,
     ) {
+        let (broker_to_topic_creator_tx, mut broker_to_topic_creator_rx) =
+            mpsc::channel::<TopicManagerResponse>(MPSC_MAX_Q_SIZE);
         loop {
             tokio::select! {
+                Some(command) = broker_to_topic_creator_rx.recv() => {
+                    match command {
+                        TopicManagerResponse::TopicCreated { topic_metadata, partition_zero_tx } => {
+                            tracing::info!("*** Topic is ready to serve: {:?}", &topic_metadata);
+                            self.topic_metadata.insert(topic_metadata.name.clone(), topic_metadata.clone());
+                            self.local_partition_writers.insert(
+                                topic_metadata.name.clone(),
+                                partition_zero_tx,
+                            );
+                        }
+                        TopicManagerResponse::TopicCreationFailed { topic_name, error } => {
+                            tracing::error!("Failed to create topic: {} due to: {}", topic_name, error);
+                        }
+                    }
+                },
                 Some(command) = command_rx.recv() => {
                     match command {
                         CommandToBroker::CreateNewTopic { topic, broker_tx } => {
@@ -76,44 +94,29 @@ impl Broker {
                             let cancellation_token = cancellation_token.clone();
                             let cluster_info = self.cluster_info.clone();
                             let topic_to_create = topic.clone();
-                            let (oneshot_tx, oneshot_rx) = oneshot::channel::<Option<(mpsc::Sender<PartitionCommand>, TopicMetadata)>>();
                             tracing::debug!("Received create topic command from peer: {}, topic: {}. Creating separate task for this.",
                                 self_address, topic.name);
 
-                            tokio::spawn(async move {
-                                    tracing::debug!("from within task: creating topic: {}", topic_to_create.name);
-                                    let result = create_topic::create_topic(
-                                        topic_to_create,
-                                        self_address,
-                                        self_data_dir_path,
-                                        cluster_info,
-                                        cancellation_token,
-                                    ).await;
-                                    let _= oneshot_tx.send(result);
+                            // Immediately return InProgress to the sender to avoid blocking the command processing loop.
+                            let request_id = self.handeled_request_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            broker_tx.send(BrokerResponse::RequestInProgress { request_id }).unwrap_or_else(|e| {
+                                tracing::error!("Failed to send broker response: {:?}", e);
                             });
-                            match oneshot_rx.await {
-                                Ok(result) => {
-                                let (partition_zero_writer, topic_metadata) = result.unwrap();
-                                self.local_partition_writers.insert(topic.name.clone(), partition_zero_writer);
-                                let broker_response = BrokerResponse::TopicCreated {
-                                    topic_metadata: topic_metadata.clone(),
-                                };
-                                self.topic_metadata.insert(topic.name.clone(), topic_metadata);
-                                broker_tx.send(broker_response).unwrap_or_else(|e| {
-                                    tracing::error!("Failed to send broker response: {:?}", e);
-                                });
-                                },
-                                Err(e) => {
-                                    tracing::error!("Failed to create topic: {:?} due to: {:?}", topic, e);
-                                    broker_tx.send(BrokerResponse::BrokerError {
-                                        message: format!("Failed to create topic: {} due to: {}", topic.name, e)
-                                    }).unwrap_or_else(|e| {
-                                        tracing::error!("Failed to send broker response: {:?}", e);
-                                    });
-                                    continue;
-                                }
-                            };
 
+                            let broker_to_topic_creator_tx_clone = broker_to_topic_creator_tx.clone();
+
+                            // Spawn a new task to handle topic creation.
+                            tokio::spawn(async move {
+                                tracing::debug!("from within task: creating topic: {}", topic_to_create.name);
+                                create_topic::create_topic(
+                                    topic_to_create,
+                                    self_address,
+                                    self_data_dir_path,
+                                    cluster_info,
+                                    broker_to_topic_creator_tx_clone,
+                                    cancellation_token,
+                                ).await;
+                            });
                         }
                         CommandToBroker::CreatePartitionWriter { topic_name, partition_number, role, broker_tx } => {
                             tracing::info!("Received create partition writer command from peer for topic: {}, partition: {}, role: {:?}", topic_name, partition_number, role);

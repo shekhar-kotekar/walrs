@@ -27,16 +27,16 @@ pub async fn handle_admin_request(
                 // Wait for the broker's response
                 match broker_rx.await {
                     Ok(response) => response.to_cluster_response(),
-                    Err(e) => ClusterResponse::InternalError {
+                    Err(e) => ClusterResponse::Error {
                         message: format!("Error details: {:?}", e),
                     },
                 }
             }
-            _ => ClusterResponse::InternalError {
+            _ => ClusterResponse::Error {
                 message: "Unknown admin command".to_string(),
             },
         },
-        None => ClusterResponse::InternalError {
+        None => ClusterResponse::Error {
             message: "Failed to read admin command".to_string(),
         },
     }
