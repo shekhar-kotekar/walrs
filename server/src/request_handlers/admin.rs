@@ -1,5 +1,6 @@
 use common::models::{ClientCommand, ClusterResponse};
 use tokio::net::TcpStream;
+use tokio::sync::oneshot;
 
 use crate::models::{BrokerResponse, CommandToBroker};
 use crate::request_handlers::commons;
@@ -17,10 +18,25 @@ pub async fn handle_admin_request(
     match next_command {
         Some(command) => match command {
             ClientCommand::CreateTopic { topic_details } => {
-                let (broker_oneshot_tx, broker_rx) =
-                    tokio::sync::oneshot::channel::<BrokerResponse>();
+                let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerResponse>();
                 let broker_command: CommandToBroker = CommandToBroker::CreateNewTopic {
                     topic: topic_details,
+                    broker_tx: broker_oneshot_tx,
+                };
+                broker_tx.send(broker_command).await.unwrap();
+                // Wait for the broker's response
+                match broker_rx.await {
+                    Ok(response) => response.to_cluster_response(),
+                    Err(e) => ClusterResponse::Error {
+                        message: format!("Error details: {:?}", e),
+                    },
+                }
+            }
+            ClientCommand::GetStatus { topic_name } => {
+                tracing::info!("Received GetStatus command for topic: {}", topic_name);
+                let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerResponse>();
+                let broker_command: CommandToBroker = CommandToBroker::GetTopicStatus {
+                    topic_name: topic_name.to_string(),
                     broker_tx: broker_oneshot_tx,
                 };
                 broker_tx.send(broker_command).await.unwrap();

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use common::models::TopicMetadata;
 use tokio::sync::{mpsc, oneshot};
@@ -18,7 +18,6 @@ pub struct Broker {
     heartbeat_interval: tokio::time::Interval,
     local_partition_writers: HashMap<String, mpsc::Sender<PartitionCommand>>,
     topic_metadata: HashMap<String, TopicMetadata>,
-    handeled_request_count: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl Broker {
@@ -59,7 +58,6 @@ impl Broker {
             heartbeat_interval,
             local_partition_writers: HashMap::new(),
             topic_metadata: HashMap::new(),
-            handeled_request_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
     pub async fn start(
@@ -88,6 +86,22 @@ impl Broker {
                 },
                 Some(command) = command_rx.recv() => {
                     match command {
+                        CommandToBroker::GetTopicStatus { topic_name, broker_tx } => {
+                            tracing::info!("Received request for topic status: {}", topic_name);
+                            if let Some(topic_metadata) = self.topic_metadata.get(&topic_name) {
+                                broker_tx.send(BrokerResponse::TopicCreated {
+                                    topic_metadata: topic_metadata.clone(),
+                                }).unwrap_or_else(|e| {
+                                    tracing::error!("Failed to send broker response: {:?}", e);
+                                });
+                            } else {
+                                broker_tx.send(BrokerResponse::BrokerError {
+                                    message: format!("Topic {} not found", topic_name),
+                                }).unwrap_or_else(|e| {
+                                    tracing::error!("Failed to send broker response: {:?}", e);
+                                });
+                            }
+                        }
                         CommandToBroker::CreateNewTopic { topic, broker_tx } => {
                             let self_address = self.address.clone();
                             let self_data_dir_path = self.data_dir_path.clone();
@@ -98,8 +112,7 @@ impl Broker {
                                 self_address, topic.name);
 
                             // Immediately return InProgress to the sender to avoid blocking the command processing loop.
-                            let request_id = self.handeled_request_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                            broker_tx.send(BrokerResponse::RequestInProgress { request_id }).unwrap_or_else(|e| {
+                            broker_tx.send(BrokerResponse::RequestInProgress).unwrap_or_else(|e| {
                                 tracing::error!("Failed to send broker response: {:?}", e);
                             });
 
@@ -107,7 +120,6 @@ impl Broker {
 
                             // Spawn a new task to handle topic creation.
                             tokio::spawn(async move {
-                                tracing::debug!("from within task: creating topic: {}", topic_to_create.name);
                                 create_topic::create_topic(
                                     topic_to_create,
                                     self_address,

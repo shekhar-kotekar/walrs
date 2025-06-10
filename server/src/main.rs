@@ -133,7 +133,7 @@ fn get_broker_config(pod_ip: &str) -> BrokerConfig {
 }
 
 async fn validate_client_request_to_connect(client_type: &ClientType, socket: &mut TcpStream) {
-    tracing::info!("Client requested to connect: {:?}", client_type);
+    tracing::debug!("Client type: {:?}", client_type);
     let response = match client_type {
         ClientType::Producer => ClusterResponse::ConnectionAccepted,
         ClientType::Consumer { topic_name: _ } => ClusterResponse::ConnectionAccepted,

@@ -142,6 +142,10 @@ pub enum CommandToBroker {
         topics: Vec<String>,
         broker_tx: oneshot::Sender<BrokerResponse>,
     },
+    GetTopicStatus {
+        topic_name: String,
+        broker_tx: oneshot::Sender<BrokerResponse>,
+    },
 }
 
 #[derive(Debug)]
@@ -160,15 +164,10 @@ pub enum BrokerResponse {
         message: String,
     },
     PeerRegistered,
-    TopicMetadata {
-        metadata: common::models::TopicMetadata,
-    },
     PartitionLeaders {
         partition_leaders: HashMap<String, Vec<String>>,
     },
-    RequestInProgress {
-        request_id: u64,
-    },
+    RequestInProgress,
 }
 
 impl BrokerResponse {
@@ -178,11 +177,7 @@ impl BrokerResponse {
                 topic_metadata: topic_metadata.clone(),
             },
             BrokerResponse::TopicAlreadyExists => ClusterResponse::TopicAlreadyExists,
-            BrokerResponse::RequestInProgress { request_id } => {
-                ClusterResponse::RequestInProgress {
-                    request_id: *request_id,
-                }
-            }
+            BrokerResponse::RequestInProgress => ClusterResponse::RequestInProgress,
             BrokerResponse::BrokerError { message } => ClusterResponse::Error {
                 message: message.clone(),
             },

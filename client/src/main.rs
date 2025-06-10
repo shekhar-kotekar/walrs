@@ -34,31 +34,73 @@ async fn main() {
         payload: "second_message".as_bytes().to_vec(),
     };
     let sent_messages = vec![first_message, second_message];
-    let received_messages: Vec<Message> = match admin.create_topic(command) {
+    match admin.create_topic(command) {
         ClusterResponse::TopicCreated { topic_metadata } => {
             tracing::info!("Topic created successfully. Metadata: {:?}", topic_metadata);
             send_messages(topic_name, sent_messages.clone());
-            // read_messages(topic_name, admin.brokers.clone()).await
-            Vec::new() // Temporarily returning an empty vector to avoid compilation error
+
+            let received_messages = read_messages(topic_name, admin.brokers.clone()).await;
+            tracing::debug!("received messages");
+            for message in &received_messages {
+                tracing::debug!("  {:?}", message);
+            }
+        }
+        ClusterResponse::RequestInProgress => {
+            tracing::info!("Request is in progress");
+            // keep sending status requests until the topic is created
+            let mut attempts = 0;
+            loop {
+                tracing::info!("Checking request status. Attempt: {}", attempts);
+                if attempts >= 10 {
+                    tracing::error!("Request timed out after 10 attempts.");
+                    break;
+                }
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                let status_response = admin.get_request_status(topic_name.to_string());
+                match status_response {
+                    ClusterResponse::TopicCreated { topic_metadata } => {
+                        tracing::info!(
+                            "Topic created successfully. Metadata: {:?}",
+                            topic_metadata
+                        );
+                        send_messages(topic_name, sent_messages.clone());
+
+                        let received_messages =
+                            read_messages(topic_name, admin.brokers.clone()).await;
+                        tracing::debug!("received messages");
+                        for message in &received_messages {
+                            tracing::debug!("  {:?}", message);
+                        }
+                        break;
+                    }
+                    ClusterResponse::RequestInProgress => {
+                        attempts += 1;
+                        tracing::info!("Request still in progress. Attempt: {}", attempts);
+                    }
+                    e => {
+                        tracing::error!("Unexpected response: {:?}", e);
+                        attempts += 1;
+                    }
+                }
+            }
         }
         ClusterResponse::TopicAlreadyExists => {
             tracing::info!("{} topic already exists.", topic_name);
             send_messages(topic_name, sent_messages.clone());
-            // read_messages(topic_name, admin.brokers.clone()).await
-            Vec::new() // Temporarily returning an empty vector to avoid compilation error
+
+            let received_messages = read_messages(topic_name, admin.brokers.clone()).await;
+            tracing::debug!("received messages");
+            for message in &received_messages {
+                tracing::debug!("  {:?}", message);
+            }
         }
         e => {
             tracing::error!("Failed to create topic because: {:?}", e);
-            Vec::new()
         }
     };
     // check if sent messages and received messages are same
     tracing::debug!("sent messages");
     for message in &sent_messages {
-        tracing::debug!("  {:?}", message);
-    }
-    tracing::debug!("received messages");
-    for message in &received_messages {
         tracing::debug!("  {:?}", message);
     }
 }

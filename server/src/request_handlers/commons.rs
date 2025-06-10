@@ -25,9 +25,6 @@ pub async fn handle_get_topic_metadata_request(
     broker_tx.send(command_to_broker).await.unwrap();
     match broker_oneshot_rx.await {
         Ok(response) => match response {
-            BrokerResponse::TopicMetadata { metadata } => {
-                ClusterResponse::TopicMetadata { metadata }
-            }
             BrokerResponse::TopicNotFound => ClusterResponse::TopicNotFound,
             _ => ClusterResponse::Error {
                 message: "Unexpected response from broker".to_string(),
