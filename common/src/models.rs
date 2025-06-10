@@ -3,7 +3,19 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, io::Read, net::TcpStream};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ProducerCommand {
+    WriteMessages {
+        topic_name: String,
+        messages: Vec<Message>,
+    },
+    GetPartitionLeaders {
+        topics: Vec<String>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Message {
+    pub key: Option<String>,
     pub payload: Vec<u8>,
 }
 
@@ -11,6 +23,9 @@ pub struct Message {
 pub enum ClientCommand {
     CreateTopic { topic_details: Topic },
     RequestToConnect { client_type: ClientType },
+    GetTopicMetadata { topic_name: String },
+    GetPartitionLeaders { topics: Vec<String> },
+    GetStatus { topic_name: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -31,9 +46,30 @@ pub enum AckLevel {
     All,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum PartitionWriterRole {
+    Leader { follower_addresses: Vec<String> },
+    Follower,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopicMetadata {
+    pub name: String,
+    pub replication_factor: u8,
+    pub retention_period_minutes: u16,
+    pub ack_level: AckLevel,
+    pub partitions: Vec<PartitionInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PartitionInfo {
+    pub number: u8,
+    pub leader_address: String,
+    pub follower_addresses: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Topic {
-    pub id: Option<u64>,
     pub name: String,
     pub num_partitions: u8,
     pub replication_factor: u8,
@@ -48,29 +84,68 @@ impl Topic {
         replication_factor: Option<u8>,
         retention_period_minutes: Option<u16>,
         ack_level: Option<AckLevel>,
-    ) -> Self {
-        Self {
-            id: None,
+    ) -> Result<Self, String> {
+        let new_topic = Self {
             name,
             num_partitions: num_partitions.unwrap_or(3),
             replication_factor: replication_factor.unwrap_or(3),
-            retention_period_minutes: retention_period_minutes.unwrap_or(48),
+            retention_period_minutes: retention_period_minutes.unwrap_or(60),
             ack_level: ack_level.unwrap_or(AckLevel::Leader),
+        };
+        new_topic.check_constraints().unwrap();
+        Ok(new_topic)
+    }
+
+    fn check_constraints(&self) -> Result<(), String> {
+        if self.num_partitions < 1 {
+            return Err("Number of partitions must be at least 1".to_string());
         }
+        if self.replication_factor < 1 || self.replication_factor > self.num_partitions {
+            return Err(
+                "Replication factor must be between 1 and the number of partitions".to_string(),
+            );
+        }
+        if self.retention_period_minutes == 0 {
+            return Err("Retention period must be greater than 0".to_string());
+        }
+        if self.name.is_empty() {
+            return Err("Topic name cannot be empty".to_string());
+        }
+        if self.name.len() > 25 {
+            return Err("Topic name cannot exceed 25 characters".to_string());
+        }
+        Ok(())
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ClusterResponse {
-    TopicCreated { partition_leaders: HashMap<u8, String> },
+    TopicCreated {
+        topic_metadata: TopicMetadata,
+    },
     TopicAlreadyExists,
     TopicNotFound,
-    InternalError { message: String },
+    Error {
+        message: String,
+    },
     ConnectionAccepted,
-    ConnectionRejected { reason: String },
-    MessagesPersisted { count: u8 },
+    ConnectionRejected {
+        reason: String,
+    },
+    MessagesPersisted {
+        count: u8,
+    },
     ConsumerResponse(ConsumerResponse),
-    Success { message: String },
+    Success {
+        message: String,
+    },
+    TopicMetadata {
+        metadata: TopicMetadata,
+    },
+    PartitionLeaders {
+        leaders: HashMap<String, Vec<String>>,
+    },
+    RequestInProgress,
 }
 
 impl ClusterResponse {

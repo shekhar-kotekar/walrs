@@ -18,7 +18,8 @@ impl Encoder<MessageBatch> for MessageBatchCodec {
     type Error = std::io::Error;
 
     fn encode(&mut self, item: MessageBatch, buf: &mut BytesMut) -> Result<(), Self::Error> {
-        let encoded_batch = bincode::serialize(&item).map_err(|e| Error::new(ErrorKind::Other, e))?;
+        let encoded_batch =
+            bincode::serialize(&item).map_err(|e| Error::new(ErrorKind::Other, e))?;
         buf.put_u32(encoded_batch.len() as u32);
         buf.extend_from_slice(&encoded_batch);
         Ok(())
@@ -54,9 +55,11 @@ mod tests {
     fn test_encode_decode_message_batch() {
         let messages = vec![
             Message {
+                key: Some("key1".to_string()),
                 payload: b"hello".to_vec(),
             },
             Message {
+                key: None,
                 payload: b"world".to_vec(),
             },
         ];
@@ -69,7 +72,9 @@ mod tests {
         let mut buf = BytesMut::new();
 
         // Encode the batch
-        codec.encode(batch.clone(), &mut buf).expect("Encoding failed");
+        codec
+            .encode(batch.clone(), &mut buf)
+            .expect("Encoding failed");
 
         // Decode the batch
         let decoded = codec.decode(&mut buf).expect("Decoding failed");
@@ -79,6 +84,7 @@ mod tests {
     #[test]
     fn test_partial_decode_returns_none() {
         let messages = vec![Message {
+            key: Some("key1".to_string()),
             payload: b"partial".to_vec(),
         }];
         let batch = MessageBatch {

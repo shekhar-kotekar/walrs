@@ -21,7 +21,7 @@ prepare:
 test: prepare
 	@echo
 	@echo "Running tests for $(PACKAGE) package and the tests with #[traced_test] attribute"
-	RUST_LOG=debug cargo test --package $(PACKAGE) -- --nocapture
+	RUST_LOG=info cargo test --package $(PACKAGE) -- --nocapture
 
 set_kind_context:
 	kubectl config use-context ${k8s_context}

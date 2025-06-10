@@ -97,7 +97,8 @@ impl ConsumerResponse {
     pub fn deserialize(stream: &mut TcpStream) -> Option<ConsumerResponse> {
         let mut buffer = [0u8; 64];
         let bytes_read = stream.read(&mut buffer).ok()?;
-        let consumer_response: ConsumerResponse = bincode::deserialize(&buffer[..bytes_read]).ok()?;
+        let consumer_response: ConsumerResponse =
+            bincode::deserialize(&buffer[..bytes_read]).ok()?;
         Some(consumer_response)
     }
 }

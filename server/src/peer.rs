@@ -1,8 +1,7 @@
-use crate::models::{to_bytes, BrokerResponse, CommandToBroker, CommandToPeer, PeerResponse};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use crate::models::{BrokerResponse, CommandToBroker, CommandToPeer, PeerResponse};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
-use tokio_util::bytes::BytesMut;
 use tokio_util::sync::CancellationToken;
 
 pub async fn start_peer_listener(
@@ -10,16 +9,18 @@ pub async fn start_peer_listener(
     broker_tx: mpsc::Sender<CommandToBroker>,
     cancellation_token: CancellationToken,
 ) {
-    let peer_listener = tokio::net::TcpListener::bind(&address).await.unwrap_or_else(|_| {
-        panic!("Failed to bind peer listener on address: {}", address);
-    });
+    let peer_listener = tokio::net::TcpListener::bind(&address)
+        .await
+        .unwrap_or_else(|_| {
+            panic!("Failed to bind peer listener on address: {}", address);
+        });
     tracing::info!("Peer listener started on {}", address);
 
     tokio::select! {
         _ = async {
             loop {
                 let (socket, _) = peer_listener.accept().await.unwrap();
-                tracing::info!("Accepted new peer connection from: {}", socket.peer_addr().unwrap());
+                tracing::debug!("Accepted new peer connection from: {}", socket.peer_addr().unwrap());
                 let broker_tx_clone = broker_tx.clone();
                 let cancellation_token_clone = cancellation_token.clone();
                 tokio::spawn(async move {
@@ -47,11 +48,16 @@ async fn handle_peer_request(
             tracing::info!("Peer request handler cancelled.");
         }
         _ = async {
-            let command = read_command_from_socket(&mut socket).await;
+            let command = common::read_command_from_socket::<CommandToPeer>(&mut socket).await;
 
             let response: PeerResponse = match command {
                 Some(CommandToPeer::CreatePartitionWriter { topic_name, partition_number, role }) => {
-                    tracing::info!("Received create partition writer command from peer: {}", socket.peer_addr().unwrap());
+                    tracing::info!("Received create partition command from peer: {}, topic: {}, partition: {}, role: {:?}",
+                    socket.peer_addr().unwrap(),
+                    topic_name,
+                    partition_number,
+                    role);
+
                     let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerResponse>();
                     let broker_command = CommandToBroker::CreatePartitionWriter {
                         topic_name,
@@ -59,6 +65,7 @@ async fn handle_peer_request(
                         role,
                         broker_tx: broker_oneshot_tx,
                     };
+                    tracing::info!("forwarding request to broker.");
                     broker_tx.send(broker_command).await.expect("Failed to send create partition writer command to broker");
 
                     match broker_rx.await {
@@ -72,7 +79,7 @@ async fn handle_peer_request(
                     }
                 }
                 Some(CommandToPeer::Heartbeat {peer_listener_address, broker_status }) => {
-                    tracing::info!("Received heartbeat from peer: {}", socket.peer_addr().unwrap());
+                    tracing::debug!("Received heartbeat from peer: {}", peer_listener_address);
                     let (broker_oneshot_tx, broker_rx) = oneshot::channel::<BrokerResponse>();
                     let broker_command = CommandToBroker::Heartbeat {
                         sender_address: peer_listener_address,
@@ -96,31 +103,16 @@ async fn handle_peer_request(
                     message: "Failed to read command from socket".to_string(),
                 },
             };
-            let response_bytes = to_bytes(&response);
-            let response_size = response_bytes.len();
-
-            tracing::debug!("Sending response of size {} bytes", response_size);
-
-            socket.write_u32(response_size as u32)
-                .await
-                .expect("Failed to write response size to socket");
-
+            tracing::info!("Sending response to peer: {}", socket.peer_addr().unwrap());
             socket
-                .write_all(&response_bytes)
+                .write_all(&common::to_bytes(&response))
                 .await
                 .expect("Failed to write response to socket");
 
             socket.flush().await.expect("Failed to flush socket");
 
         } => {
-            tracing::info!("Peer request handler completed successfully.");
+            tracing::debug!("Peer request handler completed successfully.");
         }
     }
-}
-
-async fn read_command_from_socket(socket: &mut TcpStream) -> Option<CommandToPeer> {
-    let mut buffer = BytesMut::with_capacity(1024);
-    let bytes_read = socket.read_buf(&mut buffer).await.ok()?;
-    tracing::debug!("Received {} bytes from socket", bytes_read);
-    Some(crate::models::from_bytes::<CommandToPeer>(&buffer))
 }

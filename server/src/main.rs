@@ -1,8 +1,5 @@
-use std::collections::HashMap;
-
-use broker::Broker;
 use common::models::{ClientCommand, ClientType, ClusterResponse};
-use models::{BrokerConfig, BrokerConfigBuilder, BrokerInfo, ClusterInfo, CommandToBroker};
+use models::{BrokerConfig, BrokerConfigBuilder, CommandToBroker};
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
@@ -15,18 +12,22 @@ use tokio::{
 
 use request_handlers::{
     admin::handle_admin_request,
-    commons::{self, read_client_command},
+    commons::{handle_get_topic_metadata_request, read_client_command},
     consumer::handle_consumer_request,
     producer::handle_producer_request,
 };
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
-use tracing_subscriber::prelude::*;
+
+use crate::broker::manager::Broker;
+
+// use tracing_subscriber::prelude::*;
 
 mod broker;
 mod models;
-mod partition;
+mod partition_managers;
 mod peer;
 mod request_handlers;
+mod topic_managers;
 
 // TODO: Read all the constants from a config file
 const MPSC_MAX_Q_SIZE: usize = 100;
@@ -42,7 +43,7 @@ async fn main() {
     //     tracing::warn!("Console subscriber initialized.");
     // }
     // init_tracing_with_console();
-    common::init_tracing();
+    common::init_tracing(Some(tracing::Level::INFO));
     let pod_ip: String = std::env::var("POD_IP").expect("POD_IP environment variable not set.");
 
     let task_tracker = TaskTracker::new();
@@ -52,57 +53,43 @@ async fn main() {
     let broker_address = format!("{}:{}", &pod_ip, broker_config.port);
     let broker_cancellation_token = cancellation_token.child_token();
 
-    let cluster_peers: HashMap<String, BrokerInfo> = broker_config
-        .peers
-        .iter()
-        .map(|peer| {
-            (
-                peer.clone(),
-                BrokerInfo {
-                    address: peer.clone(),
-                    partition_leaders: Vec::new(),
-                },
-            )
-        })
-        .collect();
-
-    let cluster_info = ClusterInfo {
-        brokers: cluster_peers,
-        topics_in_cluster: vec![],
-    };
     let mut broker = Broker::new(
-        &pod_ip,
-        broker_config.port,
+        pod_ip.clone(),
         broker_config.peer_listener_port,
-        &broker_config.base_path_for_data,
+        broker_config.peers.clone(),
+        broker_config.base_path_for_data,
         broker_config.heartbeat_interval_ms,
-        broker_cancellation_token,
-        cluster_info,
     );
 
-    let (main_tx, main_rx) = mpsc::channel::<CommandToBroker>(MPSC_MAX_Q_SIZE);
-    task_tracker.spawn(async move { broker.start(main_rx).await });
+    let (broker_tx, broker_rx) = mpsc::channel::<CommandToBroker>(MPSC_MAX_Q_SIZE);
+    task_tracker.spawn(async move { broker.start(broker_rx, broker_cancellation_token).await });
 
     let peer_listener_cancellation_token = cancellation_token.child_token();
-    let broker_tx = main_tx.clone();
+    let broker_tx_clone = broker_tx.clone();
     let peer_listener_address = format!("{}:{}", &pod_ip, &broker_config.peer_listener_port);
     task_tracker.spawn(async move {
-        peer::start_peer_listener(peer_listener_address, broker_tx, peer_listener_cancellation_token).await
+        peer::start_peer_listener(
+            peer_listener_address,
+            broker_tx_clone,
+            peer_listener_cancellation_token,
+        )
+        .await
     });
 
     let main_tcp_listener = TcpListener::bind(broker_address).await.unwrap();
     tracing::debug!("Listening on: {}", main_tcp_listener.local_addr().unwrap());
 
-    let mut sigterm: Signal = signal(SignalKind::terminate()).expect("Failed to create signal handler");
+    let mut sigterm: Signal =
+        signal(SignalKind::terminate()).expect("Failed to create signal handler");
 
     tokio::select! {
         _ = async {
             loop {
                 let (socket, _) = main_tcp_listener.accept().await.unwrap();
-                let main_tx_clone = main_tx.clone();
+                let broker_tx_clone = broker_tx.clone();
                 let client_request_cancellation_token = cancellation_token.child_token();
                 task_tracker.spawn(async move {
-                    process_client_request(socket, main_tx_clone, client_request_cancellation_token).await;
+                    process_client_request(socket, broker_tx_clone, client_request_cancellation_token).await;
                 });
             }
         } => {
@@ -133,25 +120,29 @@ async fn main() {
 
 fn get_broker_config(pod_ip: &str) -> BrokerConfig {
     let config_file_path = std::env::var("BROKER_CONFIG_FILE").unwrap_or_else(|_| {
-        tracing::warn!("BROKER_CONFIG_FILE environment variable not set. Using default config file path.");
+        tracing::warn!(
+            "BROKER_CONFIG_FILE environment variable not set. Using default config file path."
+        );
         "./configs/broker_conf.yml".to_string()
     });
 
     let builder = BrokerConfigBuilder::from_yaml_file(&config_file_path)
         .expect("Failed to read broker config from YAML file")
         .ip(pod_ip.to_string());
-    // .base_path_for_data(BASE_PATH_FOR_DATA.to_string())
-    // .mpsc_max_queue_size(MPSC_MAX_Q_SIZE);
     builder.build()
 }
 
 async fn validate_client_request_to_connect(client_type: &ClientType, socket: &mut TcpStream) {
+    tracing::debug!("Client type: {:?}", client_type);
     let response = match client_type {
         ClientType::Producer => ClusterResponse::ConnectionAccepted,
         ClientType::Consumer { topic_name: _ } => ClusterResponse::ConnectionAccepted,
         ClientType::Admin => ClusterResponse::ConnectionAccepted,
     };
-    socket.write_all(&bincode::serialize(&response).unwrap()).await.unwrap();
+    socket
+        .write_all(&bincode::serialize(&response).unwrap())
+        .await
+        .unwrap();
 }
 
 async fn process_client_request(
@@ -163,7 +154,7 @@ async fn process_client_request(
     tokio::select! {
         _ = cancellation_token.cancelled() => {
             tracing::info!("Cancellation token called. Stopping processing request.");
-            let internal_server_error = ClusterResponse::InternalError {
+            let internal_server_error = ClusterResponse::Error {
                 message: "Request processing was cancelled".to_string(),
             };
             socket.write_all(&bincode::serialize(&internal_server_error).unwrap()).await.unwrap();
@@ -176,9 +167,7 @@ async fn process_client_request(
                     tracing::debug!("Received client command: {:?}", command);
                     match command {
                         ClientCommand::RequestToConnect { client_type } => {
-                            tracing::info!("Client requested to connect: {:?}", client_type);
                             validate_client_request_to_connect(&client_type, &mut socket).await;
-
                             match &client_type {
                                 ClientType::Producer =>  handle_producer_request(&mut socket, broker_tx).await,
                                 ClientType::Consumer { topic_name } => {
@@ -188,9 +177,12 @@ async fn process_client_request(
                                 ClientType::Admin => handle_admin_request(&mut socket, broker_tx).await,
                             }
                         }
+                        ClientCommand::GetTopicMetadata { topic_name } => {
+                            handle_get_topic_metadata_request(&topic_name, broker_tx).await
+                        }
                         _ => {
                             tracing::warn!("Unknown client command: {:?}", command);
-                            ClusterResponse::InternalError {
+                            ClusterResponse::Error {
                                 message: "Unknown client command".to_string(),
                             }
                         }
@@ -198,38 +190,37 @@ async fn process_client_request(
                 }
                 None => {
                     tracing::error!("Failed to deserialize client command");
-                    ClusterResponse::InternalError {
+                    ClusterResponse::Error {
                         message: "Failed to deserialize client command".to_string(),
                     }
                 }
             };
-            tracing::debug!("response from cluster: {:?}", response);
             socket.write_all(&bincode::serialize(&response).unwrap()).await.unwrap();
-            tracing::debug!("Response sent to client: {}", socket.peer_addr().unwrap());
+            tracing::debug!("Response {:?} sent to client: {}", response, socket.peer_addr().unwrap());
         } => {
-            tracing::info!("Client request processing completed.");
+            tracing::debug!("Client request processing completed.");
         }
     }
 }
 
-fn init_tracing_with_console() {
-    let console_layer = console_subscriber::spawn();
+// fn init_tracing_with_console() {
+//     let console_layer = console_subscriber::spawn();
 
-    let tracing_layer = tracing_subscriber::fmt::layer()
-        .with_target(false)
-        .with_thread_ids(true)
-        .with_filter(if cfg!(debug_assertions) {
-            tracing_subscriber::filter::LevelFilter::DEBUG
-        } else {
-            tracing_subscriber::filter::LevelFilter::INFO
-        });
+//     let tracing_layer = tracing_subscriber::fmt::layer()
+//         .with_target(false)
+//         .with_thread_ids(true)
+//         .with_filter(if cfg!(debug_assertions) {
+//             tracing_subscriber::filter::LevelFilter::DEBUG
+//         } else {
+//             tracing_subscriber::filter::LevelFilter::INFO
+//         });
 
-    tracing_subscriber::registry()
-        .with(console_layer)
-        .with(tracing_layer)
-        .init();
-    tracing::info!("Console and tracing subscriber initialized.");
-}
+//     tracing_subscriber::registry()
+//         .with(console_layer)
+//         .with(tracing_layer)
+//         .init();
+//     tracing::info!("Console and tracing subscriber initialized.");
+// }
 
 // Main will be responsible for external facing communication like producer or consumer requests.
 // Internal communication will be handled by Node and partition managers.
