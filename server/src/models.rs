@@ -130,15 +130,7 @@ pub enum CommandToBroker {
         sender_status: BrokerInfo,
         broker_tx: oneshot::Sender<BrokerResponse>,
     },
-    RegisterPeer {
-        peer_info: BrokerInfo,
-        broker_tx: oneshot::Sender<BrokerResponse>,
-    },
     GetTopicMetadata {
-        topic_name: String,
-        broker_tx: oneshot::Sender<BrokerResponse>,
-    },
-    GetPartitionLeaders {
         topics: Vec<String>,
         broker_tx: oneshot::Sender<BrokerResponse>,
     },
@@ -153,19 +145,17 @@ pub enum BrokerResponse {
     TopicCreated {
         topic_metadata: common::models::TopicMetadata,
     },
+    TopicMetadata {
+        topic_metadata: HashMap<String, common::models::TopicMetadata>,
+    },
     PartitionWriterCreated,
     TopicAlreadyExists,
     PartitionManagerFound {
         tx: mpsc::Sender<PartitionCommand>,
     },
-    TopicNotFound,
     HeartbeatReceived,
     BrokerError {
         message: String,
-    },
-    PeerRegistered,
-    PartitionLeaders {
-        partition_leaders: HashMap<String, Vec<String>>,
     },
     RequestInProgress,
 }
@@ -180,6 +170,9 @@ impl BrokerResponse {
             BrokerResponse::RequestInProgress => ClusterResponse::RequestInProgress,
             BrokerResponse::BrokerError { message } => ClusterResponse::Error {
                 message: message.clone(),
+            },
+            BrokerResponse::TopicMetadata { topic_metadata } => ClusterResponse::TopicMetadata {
+                metadata: topic_metadata.clone(),
             },
             _ => ClusterResponse::Error {
                 message: "Unknown broker response".to_string(),

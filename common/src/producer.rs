@@ -32,9 +32,9 @@ impl Producer {
     pub fn flush(&mut self) -> ClusterResponse {
         tracing::debug!("Flushing producer buffer...");
         let mut stream = TcpStream::connect(&self.brokers[0]).unwrap();
-        match authenticator::authenticate(&mut stream, ClientType::Producer) {
+        match authenticator::authenticate(&mut stream, ClientType::Admin) {
             Some(ClusterResponse::ConnectionAccepted) => {
-                tracing::info!("Producer authenticated.");
+                tracing::info!("Authenticated as admin.");
                 let partition_leaders: HashMap<String, Vec<String>> =
                     match self.get_partition_leaders_for_topics(&mut stream) {
                         Some(leaders) => leaders,
@@ -44,6 +44,12 @@ impl Producer {
                             }
                         }
                     };
+                tracing::debug!("Partition leaders retrieved: {:?}", partition_leaders);
+                stream
+                    .shutdown(std::net::Shutdown::Both)
+                    .unwrap_or_else(|e| {
+                        tracing::warn!("Error occurred while shutting down stream: {}", e);
+                    });
 
                 let messages_grouped_by_brokers = self.map_messages_to_brokers(&partition_leaders);
 
@@ -108,7 +114,7 @@ impl Producer {
         &mut self,
         stream: &mut TcpStream,
     ) -> Option<HashMap<String, Vec<String>>> {
-        let command_to_get_leaders = ClientCommand::GetPartitionLeaders {
+        let command_to_get_leaders = ClientCommand::GetTopicMetadata {
             topics: self.buffer.keys().cloned().collect(),
         };
         stream
@@ -116,9 +122,23 @@ impl Producer {
             .expect("Failed to send partition leaders request.");
 
         match ClusterResponse::deserialize(stream).unwrap() {
-            ClusterResponse::PartitionLeaders { leaders } => Some(leaders),
+            ClusterResponse::TopicMetadata { metadata } => Some(
+                metadata
+                    .into_iter()
+                    .map(|(topic, topic_metadata)| {
+                        (
+                            topic,
+                            topic_metadata
+                                .partitions
+                                .into_iter()
+                                .map(|partition| partition.leader_address)
+                                .collect(),
+                        )
+                    })
+                    .collect(),
+            ),
             ClusterResponse::Error { message } => {
-                tracing::error!("Failed to get partition leaders: {}", message);
+                tracing::error!("Failed to get partition leaders. Error: {}", message);
                 None
             }
             _ => {
