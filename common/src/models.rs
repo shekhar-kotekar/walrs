@@ -8,9 +8,6 @@ pub enum ProducerCommand {
         topic_name: String,
         messages: Vec<Message>,
     },
-    GetPartitionLeaders {
-        topics: Vec<String>,
-    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -23,8 +20,7 @@ pub struct Message {
 pub enum ClientCommand {
     CreateTopic { topic_details: Topic },
     RequestToConnect { client_type: ClientType },
-    GetTopicMetadata { topic_name: String },
-    GetPartitionLeaders { topics: Vec<String> },
+    GetTopicMetadata { topics: Vec<String> },
     GetStatus { topic_name: String },
 }
 
@@ -140,10 +136,7 @@ pub enum ClusterResponse {
         message: String,
     },
     TopicMetadata {
-        metadata: TopicMetadata,
-    },
-    PartitionLeaders {
-        leaders: HashMap<String, Vec<String>>,
+        metadata: HashMap<String, TopicMetadata>,
     },
     RequestInProgress,
 }

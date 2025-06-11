@@ -11,9 +11,7 @@ use tokio::{
 };
 
 use request_handlers::{
-    admin::handle_admin_request,
-    commons::{handle_get_topic_metadata_request, read_client_command},
-    consumer::handle_consumer_request,
+    admin::handle_admin_request, consumer::handle_consumer_request,
     producer::handle_producer_request,
 };
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
@@ -161,7 +159,7 @@ async fn process_client_request(
             socket.shutdown().await.unwrap();
         }
         _ = async {
-            let client_command = read_client_command(&mut socket).await;
+            let client_command = common::read_command_from_socket::<ClientCommand>(&mut socket).await;
             let response = match client_command {
                 Some(command) => {
                     tracing::debug!("Received client command: {:?}", command);
@@ -176,9 +174,6 @@ async fn process_client_request(
                                 },
                                 ClientType::Admin => handle_admin_request(&mut socket, broker_tx).await,
                             }
-                        }
-                        ClientCommand::GetTopicMetadata { topic_name } => {
-                            handle_get_topic_metadata_request(&topic_name, broker_tx).await
                         }
                         _ => {
                             tracing::warn!("Unknown client command: {:?}", command);

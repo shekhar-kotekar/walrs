@@ -103,7 +103,6 @@ async fn handle_peer_request(
                     message: "Failed to read command from socket".to_string(),
                 },
             };
-            tracing::info!("Sending response to peer: {}", socket.peer_addr().unwrap());
             socket
                 .write_all(&common::to_bytes(&response))
                 .await
