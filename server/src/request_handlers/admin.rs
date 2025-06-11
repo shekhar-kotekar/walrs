@@ -32,7 +32,6 @@ pub async fn handle_admin_request(
                 }
             }
             ClientCommand::GetStatus { topic_name } => {
-                tracing::info!("Received GetStatus command for topic: {}", topic_name);
                 let broker_command: CommandToBroker = CommandToBroker::GetTopicStatus {
                     topic_name: topic_name.to_string(),
                     broker_tx: broker_oneshot_tx,
@@ -47,7 +46,6 @@ pub async fn handle_admin_request(
                 }
             }
             ClientCommand::GetTopicMetadata { topics } => {
-                tracing::info!("Received GetTopicMetadata command for topics: {:?}", topics);
                 let broker_command: CommandToBroker = CommandToBroker::GetTopicMetadata {
                     topics,
                     broker_tx: broker_oneshot_tx,

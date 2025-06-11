@@ -43,6 +43,7 @@ pub fn to_bytes<T: Serialize>(value: &T) -> Vec<u8> {
 }
 
 pub fn from_bytes<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> T {
+    tracing::info!("deserializing to type: {}", std::any::type_name::<T>());
     bincode::deserialize(bytes).expect("Failed to deserialize value")
 }
 

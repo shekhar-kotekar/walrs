@@ -2,13 +2,13 @@ use crate::consumer::ConsumerResponse;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, io::Read, net::TcpStream};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum ProducerCommand {
-    WriteMessages {
-        topic_name: String,
-        messages: Vec<Message>,
-    },
-}
+// #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+// pub enum ProducerCommand {
+//     WriteMessages {
+//         topic_name: String,
+//         messages: Vec<Message>,
+//     },
+// }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Message {

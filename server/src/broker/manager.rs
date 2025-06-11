@@ -247,10 +247,7 @@ impl Broker {
         topics: Vec<String>,
         broker_tx: oneshot::Sender<BrokerResponse>,
     ) {
-        tracing::info!(
-            "Received request for topic metadata for topics: {:?}",
-            topics
-        );
+        tracing::info!("Received request for topic metadata for: {:?}", topics);
         let topic_metadata = self
             .topic_metadata
             .iter()
@@ -274,6 +271,7 @@ impl Broker {
                     );
                 });
         } else {
+            tracing::info!("Found metadata for: {:?}", topic_metadata.keys());
             broker_tx
                 .send(BrokerResponse::TopicMetadata { topic_metadata })
                 .unwrap_or_else(|e| {

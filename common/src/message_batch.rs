@@ -2,6 +2,7 @@ use std::io::{Error, ErrorKind};
 
 use bytes::{Buf, BufMut, BytesMut};
 use serde::{Deserialize, Serialize};
+use tokio::{io::AsyncReadExt, net::TcpStream};
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::models::Message;
@@ -42,6 +43,25 @@ impl Decoder for MessageBatchCodec {
         let message_batch: MessageBatch =
             bincode::deserialize(&encoded_batch).map_err(|e| Error::new(ErrorKind::Other, e))?;
         Ok(Some(message_batch))
+    }
+}
+
+impl MessageBatchCodec {
+    pub async fn decode_from_stream(
+        stream: &mut TcpStream,
+    ) -> Result<Option<MessageBatch>, std::io::Error> {
+        let mut buf = BytesMut::with_capacity(1024);
+        let bytes_read = stream.read_buf(&mut buf).await.map_err(|e| {
+            Error::new(
+                ErrorKind::Other,
+                format!("Failed to read from stream: {}", e),
+            )
+        })?;
+        if bytes_read == 0 {
+            return Ok(None); // No data read, possibly end of stream
+        }
+        let mut codec = MessageBatchCodec;
+        codec.decode(&mut buf)
     }
 }
 

@@ -30,7 +30,7 @@ impl Producer {
     }
 
     pub fn flush(&mut self) -> ClusterResponse {
-        tracing::debug!("Flushing producer buffer...");
+        tracing::info!("Flushing producer buffer...");
         let mut stream = TcpStream::connect(&self.brokers[0]).unwrap();
         match authenticator::authenticate(&mut stream, ClientType::Admin) {
             Some(ClusterResponse::ConnectionAccepted) => {
@@ -52,13 +52,16 @@ impl Producer {
                     });
 
                 let messages_grouped_by_brokers = self.map_messages_to_brokers(&partition_leaders);
-
+                tracing::info!(
+                    "Messages grouped by brokers: {:?}",
+                    messages_grouped_by_brokers
+                );
                 messages_grouped_by_brokers
                     .iter()
-                    .for_each(|(broker, messages)| {
+                    .for_each(|(broker, message_batches_to_send)| {
                         let mut stream = TcpStream::connect(broker).unwrap();
-                        tracing::debug!("Connected to broker: {}", broker);
-                        for message_batch in messages {
+                        tracing::info!("Connected to broker: {}", broker);
+                        for message_batch in message_batches_to_send {
                             let mut buf = BytesMut::new();
                             self.message_batch_codec
                                 .encode(message_batch.clone(), &mut buf)
@@ -71,7 +74,11 @@ impl Producer {
                             });
                         }
                         stream.flush().unwrap();
-                        tracing::debug!("Messages sent to broker: {}", broker);
+                        tracing::info!(
+                            "{} message batch(es) sent to: {}",
+                            message_batches_to_send.len(),
+                            broker
+                        );
                     });
                 ClusterResponse::MessagesPersisted {
                     count: self.buffer.values().map(|v| v.len()).sum::<usize>() as u8,
@@ -86,8 +93,10 @@ impl Producer {
 
     fn map_messages_to_brokers(
         &mut self,
+        // key: topic name, value: vector of partition leaders
         partition_leaders: &HashMap<String, Vec<String>>,
     ) -> HashMap<String, Vec<MessageBatch>> {
+        // key : broker address, value: vector of message batches
         let mut messages_grouped_by_brokers: HashMap<String, Vec<MessageBatch>> = HashMap::new();
         let drained_buffer: Vec<(String, Vec<Message>)> = self.buffer.drain().collect();
         for (topic, messages) in drained_buffer {
