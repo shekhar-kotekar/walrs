@@ -29,105 +29,101 @@ pub async fn create_topic(
     broker_tx: mpsc::Sender<TopicManagerResponse>,
     cancellation_token: CancellationToken,
 ) {
-    loop {
-        let topic_clone = topic.clone();
-        tokio::select! {
-            _ = cancellation_token.cancelled() => {
-                tracing::info!("Cancellation token cancelled. Topic not created.");
-                broker_tx
-                    .send(TopicManagerResponse::TopicCreationFailed {
-                        topic_name: topic_clone.name.clone(),
-                        error: "Topic creation was cancelled.".to_string(),
-                    })
-                    .await
-                    .expect("Failed to send topic creation failed command to broker");
-                break;
-            }
-            _ = async {
-                tracing::info!("Creating {:?}", topic_clone);
-                if cluster_info.brokers.len() < topic_clone.num_partitions as usize {
-                    tracing::warn!(
-                        "Not enough peers to create {} partitions.
+    let topic_clone = topic.clone();
+    tokio::select! {
+        _ = cancellation_token.cancelled() => {
+            tracing::info!("Cancellation token cancelled. Topic not created.");
+            broker_tx
+                .send(TopicManagerResponse::TopicCreationFailed {
+                    topic_name: topic_clone.name.clone(),
+                    error: "Topic creation was cancelled.".to_string(),
+                })
+                .await
+                .expect("Failed to send topic creation failed command to broker");
+        }
+        _ = async {
+            tracing::info!("Creating {:?}", topic_clone);
+            if cluster_info.brokers.len() < topic_clone.num_partitions as usize {
+                tracing::warn!(
+                    "Not enough peers to create {} partitions.
                     Topic will be created but will be under replicated. 
                     Once more peers join, walrs will move partitions to them.",
-                        topic_clone.num_partitions
-                    );
-                }
-                // step 1: for p partitions and r replication factor, we need (p * r) different partition writers
-                // example: if p = 3 and r = 2, we need 6 partition writers
-                let potential_peers_for_topic: HashMap<String, usize> =
-                    find_peers_for_topic(&self_address, topic_clone.num_partitions, &cluster_info);
-                // step 2: create local partition writer for partition 0
-                let local_partition_writer_cancellation_token = cancellation_token.child_token();
-                let partition_zero = 0;
+                    topic_clone.num_partitions
+                );
+            }
+            // step 1: for p partitions and r replication factor, we need (p * r) different partition writers
+            // example: if p = 3 and r = 2, we need 6 partition writers
+            let potential_peers_for_topic: HashMap<String, usize> =
+                find_peers_for_topic(&self_address, topic_clone.num_partitions, &cluster_info);
+            // step 2: create local partition writer for partition 0
+            let local_partition_writer_cancellation_token = cancellation_token.child_token();
+            let partition_zero = 0;
 
-                let partition_zero_tx: Option<mpsc::Sender<PartitionCommand>> = create_partition(&topic_clone.name,
-                    partition_zero,
-                    &self_address,
-                    PartitionRole::Leader {followers: potential_peers_for_topic.clone()},
-                    &local_data_dir_path,
-                    local_partition_writer_cancellation_token).await;
+            let partition_zero_tx: Option<mpsc::Sender<PartitionCommand>> = create_partition(&topic_clone.name,
+                partition_zero,
+                &self_address,
+                PartitionRole::Leader {followers: potential_peers_for_topic.clone()},
+                &local_data_dir_path,
+                local_partition_writer_cancellation_token).await;
 
-                match partition_zero_tx {
-                    Some(partition_zero_tx) => {
-                        tracing::info!("Partition 0 created for topic: {}", topic_clone.name);
+            match partition_zero_tx {
+                Some(partition_zero_tx) => {
+                    tracing::info!("Partition 0 created for topic: {}", topic_clone.name);
 
-                        let partition_zero_info = PartitionInfo {
-                            number: partition_zero,
-                            leader_address: self_address.clone(),
-                            follower_addresses: potential_peers_for_topic.keys().cloned().collect(),
-                        };
-                        let mut partitions: Vec<PartitionInfo> = vec![partition_zero_info];
+                    let partition_zero_info = PartitionInfo {
+                        number: partition_zero,
+                        leader_address: self_address.clone(),
+                        follower_addresses: potential_peers_for_topic.keys().cloned().collect(),
+                    };
+                    let mut partitions: Vec<PartitionInfo> = vec![partition_zero_info];
 
-                        match create_remote_lead_partitions(&topic_clone.name, &self_address, potential_peers_for_topic).await {
-                            Ok(remote_partitions) => {
-                                partitions.extend(remote_partitions);
-                                let topic_metadata = TopicMetadata {
-                                    name: topic_clone.name.clone(),
-                                    replication_factor: topic_clone.replication_factor,
-                                    retention_period_minutes: topic_clone.retention_period_minutes,
-                                    ack_level: topic_clone.ack_level.clone(),
-                                    partitions,
-                                };
-                                tracing::debug!(
-                                    "Topic created successfully: {:?}",
-                                    topic_metadata
-                                );
-                                broker_tx
-                                    .send(TopicManagerResponse::TopicCreated {
-                                        topic_metadata,
-                                        partition_zero_tx: partition_zero_tx.clone(),
-                                    })
-                                    .await
-                                    .expect("Failed to send topic created command to broker");
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to create remote lead partitions: {}", e);
-                                broker_tx
-                                    .send(TopicManagerResponse::TopicCreationFailed {
-                                        topic_name: topic_clone.name.clone(),
-                                        error: e.to_string(),
-                                    })
-                                    .await
-                                    .expect("Failed to send topic creation failed command to broker");
-                            }
+                    match create_remote_lead_partitions(&topic_clone.name, &self_address, potential_peers_for_topic).await {
+                        Ok(remote_partitions) => {
+                            partitions.extend(remote_partitions);
+                            let topic_metadata = TopicMetadata {
+                                name: topic_clone.name.clone(),
+                                replication_factor: topic_clone.replication_factor,
+                                retention_period_minutes: topic_clone.retention_period_minutes,
+                                ack_level: topic_clone.ack_level.clone(),
+                                partitions,
+                            };
+                            tracing::debug!(
+                                "Topic created successfully: {:?}",
+                                topic_metadata
+                            );
+                            broker_tx
+                                .send(TopicManagerResponse::TopicCreated {
+                                    topic_metadata,
+                                    partition_zero_tx: partition_zero_tx.clone(),
+                                })
+                                .await
+                                .expect("Failed to send topic created command to broker");
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to create remote lead partitions: {}", e);
+                            broker_tx
+                                .send(TopicManagerResponse::TopicCreationFailed {
+                                    topic_name: topic_clone.name.clone(),
+                                    error: e.to_string(),
+                                })
+                                .await
+                                .expect("Failed to send topic creation failed command to broker");
                         }
                     }
-                    None => {
-                        tracing::error!("Failed to create local partition writer for partition 0 of topic: {}", topic.name);
-                        broker_tx
-                            .send(TopicManagerResponse::TopicCreationFailed {
-                                topic_name: topic_clone.name.clone(),
-                                error: "Failed to create local partition writer for partition 0".to_string(),
-                            })
-                            .await
-                            .expect("Failed to send topic creation failed command to broker");
-                    }
                 }
-            } => break
-        }
+                None => {
+                    tracing::error!("Failed to create local partition writer for partition 0 of topic: {}", topic.name);
+                    broker_tx
+                        .send(TopicManagerResponse::TopicCreationFailed {
+                            topic_name: topic_clone.name.clone(),
+                            error: "Failed to create local partition writer for partition 0".to_string(),
+                        })
+                        .await
+                        .expect("Failed to send topic creation failed command to broker");
+                }
+            }
+        } => (),
     }
-    tracing::debug!("Topic creation process completed for topic: {}", topic.name);
 }
 
 async fn send_request_to_peer(
@@ -157,7 +153,7 @@ async fn send_request_to_peer(
 
 async fn create_remote_lead_partitions(
     topic_name: &String,
-    self_address: &String,
+    self_address: &str,
     potential_peers: HashMap<String, usize>,
 ) -> Result<Vec<PartitionInfo>, std::io::Error> {
     let mut partition_infos = Vec::new();
@@ -167,7 +163,7 @@ async fn create_remote_lead_partitions(
             .filter(|(address, _)| *address != partition_leader_peer_address)
             .map(|(address, index)| (address.clone(), *index))
             .collect();
-        followers.insert(self_address.clone(), 0); // add self as a follower with index 0
+        followers.insert(self_address.to_owned(), 0); // add self as a follower with index 0
         let command = CommandToPeer::CreatePartitionWriter {
             topic_name: topic_name.clone(),
             partition_number: *partition_number as u8,
@@ -233,7 +229,7 @@ fn find_peers_for_topic(
         .brokers
         .iter()
         .map(|(peer_address, peer_info)| (peer_info.registed_topics.len(), peer_address.clone()))
-        .filter(|&(_, ref peer_address)| peer_address != self_address)
+        .filter(|(_, peer_address)| peer_address != self_address)
         .collect();
     peers_sorted_by_number_of_topics.sort_by_key(|&(topic_count, _)| topic_count);
 
@@ -250,7 +246,7 @@ fn find_peers_for_topic(
 pub async fn create_partition(
     topic_name: &String,
     partition_number: u8,
-    self_address: &String,
+    self_address: &str,
     partition_role: PartitionRole,
     local_data_dir_path: &String,
     cancellation_token: CancellationToken,
@@ -283,8 +279,7 @@ pub async fn create_partition(
             );
             let peers = followers.keys().cloned().collect::<Vec<String>>();
             let all_peers_created_followers =
-                create_partition_followers(&topic_name, partition_number, peers, &self_address)
-                    .await;
+                create_partition_followers(topic_name, partition_number, peers, self_address).await;
             if all_peers_created_followers {
                 Some(partition_writer_tx)
             } else {

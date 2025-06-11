@@ -57,7 +57,7 @@ pub async fn handle_producer_request(
                         message: format!("Error details: {:?}", e),
                     },
                     _ => ClusterResponse::Error {
-                        message: format!("Unexpected error."),
+                        message: "Unexpected error.".to_string(),
                     },
                 }
             }
