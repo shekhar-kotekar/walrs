@@ -980,6 +980,10 @@ dependencies = [
  "console-subscriber",
  "tokio",
  "tokio-util",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "tracing-test",
 ]
 
 [[package]]
