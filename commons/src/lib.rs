@@ -52,7 +52,7 @@ pub async fn deserialize_from_socket<T: Decode<()>>(
 }
 
 #[cfg(test)]
-mod tests {
+mod lib {
 
     use crate::models::{AdminCommand, Client};
 
