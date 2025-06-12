@@ -64,7 +64,7 @@ pub async fn write_to_socket<T: Encode>(
 #[cfg(test)]
 mod lib {
 
-    use crate::models::{AdminCommand, WalrsClient};
+    use crate::models::{AdminCommand, WalrsCommand};
 
     use super::*;
     use tokio::{io::AsyncWriteExt, net::TcpListener};
@@ -78,25 +78,25 @@ mod lib {
 
         tokio::spawn(async move {
             let mut sender_stream = TcpStream::connect(address).await.unwrap();
-            let command_to_write = WalrsClient::Admin(AdminCommand::CreateTopic {
+            let command_to_write = WalrsCommand::Admin(AdminCommand::CreateTopic {
                 name: "test_topic".into(),
                 num_partitions: 3,
                 replication_factor: 2,
                 retention_period_ms: Some(60000),
             });
-            write_to_socket::<WalrsClient>(&command_to_write, &mut sender_stream)
+            write_to_socket::<WalrsCommand>(&command_to_write, &mut sender_stream)
                 .await
                 .unwrap();
         });
 
         let (mut receiver_stream, _) = listener.accept().await.unwrap();
 
-        let deserialized_command: WalrsClient = read_from_socket(&mut receiver_stream)
+        let deserialized_command: WalrsCommand = read_from_socket(&mut receiver_stream)
             .await
             .expect("Failed to deserialize command");
 
         tracing::debug!("Deserialized command: {:?}", deserialized_command);
-        if let WalrsClient::Admin(AdminCommand::CreateTopic {
+        if let WalrsCommand::Admin(AdminCommand::CreateTopic {
             name,
             num_partitions,
             replication_factor,
@@ -120,7 +120,7 @@ mod lib {
 
         tokio::spawn(async move {
             let mut sender_stream = TcpStream::connect(address).await.unwrap();
-            let create_topic_command = WalrsClient::Admin(AdminCommand::CreateTopic {
+            let create_topic_command = WalrsCommand::Admin(AdminCommand::CreateTopic {
                 name: "test_topic".into(),
                 num_partitions: 3,
                 replication_factor: 2,
@@ -138,12 +138,12 @@ mod lib {
 
         let (mut receiver_stream, _) = listener.accept().await.unwrap();
 
-        let deserialized_command: WalrsClient = read_from_socket(&mut receiver_stream)
+        let deserialized_command: WalrsCommand = read_from_socket(&mut receiver_stream)
             .await
             .expect("Failed to deserialize command");
 
         tracing::debug!("Deserialized command: {:?}", deserialized_command);
-        if let WalrsClient::Admin(AdminCommand::CreateTopic {
+        if let WalrsCommand::Admin(AdminCommand::CreateTopic {
             name,
             num_partitions,
             replication_factor,

@@ -26,20 +26,24 @@ pub enum ProducerCommand {
 }
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
-pub enum WalrsClient {
+pub enum WalrsCommand {
     Admin(AdminCommand),
     Producer(ProducerCommand),
 }
 
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
 pub enum AdminResponse {
     TopicCreated,
     Error(String),
 }
+
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
 pub enum ProducerResponse {
     MessagesSent,
     Error(String),
 }
 
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
 pub enum WalrsResponse {
     Admin(AdminResponse),
     Producer(ProducerResponse),
@@ -71,7 +75,7 @@ mod tests {
 
     #[test]
     fn test_command_serialization() {
-        let command = WalrsClient::Admin(AdminCommand::CreateTopic {
+        let command = WalrsCommand::Admin(AdminCommand::CreateTopic {
             name: "test_topic".into(),
             num_partitions: 3,
             replication_factor: 2,
@@ -81,14 +85,14 @@ mod tests {
         let serialized_command =
             bincode::encode_to_vec(&command, bincode::config::standard()).unwrap();
 
-        let (deserialized_command, decoded_length): (WalrsClient, usize) =
+        let (deserialized_command, decoded_length): (WalrsCommand, usize) =
             bincode::decode_from_slice(&serialized_command, bincode::config::standard()).unwrap();
 
         assert_eq!(command, deserialized_command);
         assert_eq!(serialized_command.len(), decoded_length);
         assert_eq!(decoded_length, serialized_command.len());
 
-        if let WalrsClient::Admin(AdminCommand::CreateTopic {
+        if let WalrsCommand::Admin(AdminCommand::CreateTopic {
             name,
             num_partitions,
             replication_factor,

@@ -1,5 +1,6 @@
+use commons::models::{WalrsCommand, WalrsResponse};
 use tokio::{
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     signal::{
         self,
         unix::{Signal, SignalKind, signal},
@@ -23,8 +24,12 @@ impl Node {
         tokio::select! {
             _ = async {
                 loop {
-                    let (socket, _) = main_tcp_listener.accept().await.unwrap();
-                    tracing::info!("connection accepted from: {:?}", socket.peer_addr());
+                    let (stream, _) = main_tcp_listener.accept().await.unwrap();
+                    tracing::info!("connection accepted from: {:?}", stream.peer_addr());
+                    let client_request_cancellation_token = cancellation_token.child_token();
+                    task_tracker.spawn(async move {
+                        Node::process_request(stream, client_request_cancellation_token).await;
+                    });
                 }
             } => {
                 tracing::info!("Main listener closed.");
@@ -50,11 +55,33 @@ impl Node {
             }
         }
     }
+
+    async fn process_request(mut stream: TcpStream, cancellation_token: CancellationToken) {
+        tokio::select! {
+            _ = cancellation_token.cancelled() => {
+                tracing::info!("Cancellation token cancelled. Stopped processing client request.");
+            }
+            _ = async {
+                match commons::read_from_socket::<WalrsCommand>(&mut stream).await {
+                    Ok(command) => {
+                        tracing::info!("Received command: {:?}", command);
+                        let default_response = WalrsResponse::RequestAccepted;
+                        commons::write_to_socket::<WalrsResponse>(&default_response, &mut stream).await.unwrap();
+                    }
+                    Err(err) => {
+                        tracing::error!("Failed to read command from socket: {}", err);
+                    }
+                }
+            } => {
+                tracing::info!("Client request processing completed.");
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod should {
-    use commons::models::{AdminCommand, WalrsClient};
+    use commons::models::{AdminCommand, WalrsCommand};
     use tokio::{io::AsyncWriteExt, net::TcpStream};
     use tracing_test::traced_test;
 
@@ -75,7 +102,7 @@ mod should {
         });
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let mut sender_stream = TcpStream::connect(address).await.unwrap();
-        let create_topic_command = WalrsClient::Admin(AdminCommand::CreateTopic {
+        let create_topic_command = WalrsCommand::Admin(AdminCommand::CreateTopic {
             name: "test_topic".into(),
             num_partitions: 3,
             replication_factor: 2,
@@ -84,6 +111,13 @@ mod should {
         let serialized_command =
             bincode::encode_to_vec(&create_topic_command, bincode::config::standard()).unwrap();
         sender_stream.write_all(&serialized_command).await.unwrap();
+
+        let response_from_node: WalrsResponse =
+            commons::read_from_socket::<WalrsResponse>(&mut sender_stream)
+                .await
+                .unwrap();
+
+        assert_eq!(response_from_node, WalrsResponse::RequestAccepted);
 
         cancellation_token.cancel();
     }
