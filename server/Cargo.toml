@@ -1,0 +1,9 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+console-subscriber = "0.4.1"
+tokio = "1.45.1"
+tokio-util = "0.7.15"
