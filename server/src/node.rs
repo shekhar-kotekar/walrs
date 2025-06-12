@@ -12,9 +12,8 @@ pub struct Node {
 }
 
 impl Node {
-    pub async fn start(&self) {
+    pub async fn start(&self, cancellation_token: CancellationToken) {
         let task_tracker = TaskTracker::new();
-        let cancellation_token = CancellationToken::new();
         let main_tcp_listener = TcpListener::bind(&self.address).await.unwrap();
         tracing::debug!("Listening on: {}", main_tcp_listener.local_addr().unwrap());
 
@@ -55,12 +54,37 @@ impl Node {
 
 #[cfg(test)]
 mod should {
+    use commons::models::{AdminCommand, WalrsClient};
+    use tokio::{io::AsyncWriteExt, net::TcpStream};
     use tracing_test::traced_test;
 
-    // use super::*;
+    use super::*;
 
     #[tokio::test]
     // #[ignore]
     #[traced_test]
-    async fn test_foo() {}
+    async fn return_accepted_response_when_a_command_is_sent() {
+        let address: String = "127.0.0.1:8080".into();
+        let node: Node = Node {
+            address: address.clone(),
+        };
+        let cancellation_token: CancellationToken = CancellationToken::new();
+        let node_cancellation_token = cancellation_token.child_token();
+        tokio::spawn(async move {
+            node.start(node_cancellation_token).await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let mut sender_stream = TcpStream::connect(address).await.unwrap();
+        let create_topic_command = WalrsClient::Admin(AdminCommand::CreateTopic {
+            name: "test_topic".into(),
+            num_partitions: 3,
+            replication_factor: 2,
+            retention_period_ms: Some(60000),
+        });
+        let serialized_command =
+            bincode::encode_to_vec(&create_topic_command, bincode::config::standard()).unwrap();
+        sender_stream.write_all(&serialized_command).await.unwrap();
+
+        cancellation_token.cancel();
+    }
 }

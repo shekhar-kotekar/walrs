@@ -1,5 +1,7 @@
 use std::env;
 
+use tokio_util::sync::CancellationToken;
+
 use crate::node::Node;
 
 mod node;
@@ -13,7 +15,9 @@ async fn main() {
     let node = Node {
         address: broker_address,
     };
-    node.start().await;
+    let cancellation_token = CancellationToken::new();
+    node.start(cancellation_token.child_token()).await;
 
+    cancellation_token.cancel();
     tracing::info!("Main Exited.");
 }
