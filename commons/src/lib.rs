@@ -38,44 +38,44 @@ pub fn hash_code<T: Hash>(t: &T) -> u64 {
 }
 
 pub fn to_bytes<T: Encode + Debug>(value: &T) -> Vec<u8> {
-    bincode::encode_to_vec(value, bincode::config::standard()).unwrap_or_else(|_| {
-        format!("Failed to serialize value: {:?}", value)
-            .as_bytes()
-            .to_vec()
-    })
+    bincode::encode_to_vec(value, bincode::config::standard())
+        .unwrap_or_else(|_| format!("Failed to serialize: {:?}", value).into_bytes())
 }
 
 pub fn from_bytes<T: Decode<()>>(bytes: &[u8]) -> Result<T, DecodeError> {
-    tracing::debug!("deserializing to type: {}", std::any::type_name::<T>());
+    tracing::debug!(
+        "deserializing {} bytes to type: {}",
+        bytes.len(),
+        std::any::type_name::<T>()
+    );
     bincode::decode_from_slice(bytes, bincode::config::standard()).map(|(value, _)| value)
 }
 
 pub async fn read_from_socket<T: Decode<()>>(socket: &mut TcpStream) -> Result<T, std::io::Error> {
-    let mut buffer = BytesMut::with_capacity(1024);
-    let bytes_read = socket.read_buf(&mut buffer).await.ok();
-    tracing::debug!("Received {:?} bytes from socket", bytes_read);
-    if bytes_read.is_none() || bytes_read.unwrap() == 0 {
-        return Err(std::io::Error::new(
+    let mut buffer = BytesMut::with_capacity(512);
+    let num_bytes_read = socket.read_buf(&mut buffer).await?;
+    tracing::debug!(
+        "Buffer length: {}, number of bytes read from socket: {}",
+        buffer.len(),
+        num_bytes_read,
+    );
+
+    if num_bytes_read == 0 {
+        Err(std::io::Error::new(
             std::io::ErrorKind::UnexpectedEof,
             "Socket closed",
-        ));
+        ))
+    } else {
+        from_bytes::<T>(&buffer).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Failed to deserialize data",
+            )
+        })
     }
-    tracing::debug!("Buffer length: {}", buffer.len());
-    let (decoded, decoded_length): (T, usize) =
-        bincode::decode_from_slice(&buffer, bincode::config::standard()).unwrap();
-
-    tracing::debug!("Decoded length: {}", decoded_length);
-    if decoded_length != buffer.len() {
-        tracing::warn!(
-            "Decoded length {} does not match buffer length {}",
-            decoded_length,
-            buffer.len()
-        );
-    }
-    Ok(decoded)
 }
 
-pub async fn send_message<T: Encode, ResponseType: Decode<()>>(
+pub async fn send_message<T: Encode + Debug, ResponseType: Decode<()>>(
     data: &T,
     peer_address: &String,
 ) -> Result<ResponseType, std::io::Error> {
@@ -92,7 +92,33 @@ pub async fn send_message<T: Encode, ResponseType: Decode<()>>(
     }
 }
 
-pub async fn write_to_socket<T: Encode>(
+pub async fn send_serialized_message<ResponseType: Decode<()>>(
+    serialized_data: &[u8],
+    peer_address: &String,
+) -> Result<ResponseType, std::io::Error> {
+    match TcpStream::connect(peer_address).await {
+        Ok(mut stream) => {
+            tracing::debug!(
+                "Connected. peer address: {}, local address: {}",
+                peer_address,
+                stream.local_addr().unwrap()
+            );
+            stream.write_all(serialized_data).await.unwrap();
+            tracing::debug!(
+                "Sent serialized data of length {} to: {}",
+                serialized_data.len(),
+                peer_address
+            );
+            read_from_socket::<ResponseType>(&mut stream).await
+        }
+        Err(e) => {
+            tracing::error!("Failed to connect to peer at {}: {}", peer_address, e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn write_to_socket<T: Encode + Debug>(
     data: &T,
     socket: &mut TcpStream,
 ) -> Result<(), std::io::Error> {

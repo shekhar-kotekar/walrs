@@ -20,7 +20,7 @@ mod partition_managers;
 
 #[tokio::main]
 async fn main() {
-    commons::init_tracing(Some(tracing::Level::INFO));
+    commons::init_tracing(Some(tracing::Level::DEBUG));
     let pod_ip: String = env::var("POD_IP").expect("POD_IP environment variable not set.");
 
     let node_config: NodeConfig = get_node_config(&pod_ip);

@@ -30,10 +30,10 @@ pub enum ConsumerCommand {
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
 pub enum WalrsCommand {
+    Peer(PeerCommand),
     Admin(AdminCommand),
     Producer(ProducerCommand),
     Consumer(ConsumerCommand),
-    Peer(PeerCommand),
 }
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
@@ -79,8 +79,7 @@ pub enum PeerCommand {
         role: PartitionRole,
     },
     Heartbeat {
-        peer_address: String,
-        broker_status: NodeInfo,
+        node_info: NodeInfo,
     },
 }
 

@@ -77,10 +77,10 @@ impl MainListener {
                 tracing::info!("Cancellation token cancelled. Stopped processing client request.");
             }
             _ = async {
+                tracing::debug!("Processing client request...");
                 match commons::read_from_socket::<WalrsCommand>(&mut stream).await {
                     Ok(command) => {
                         tracing::info!("Received command: {:?}", command);
-
                         let response: WalrsResponse = match command {
                             WalrsCommand::Admin(admin_command) =>{
                                 WalrsResponse::Admin(admin::handle_admin_request(admin_command, node_manager_tx).await)
@@ -114,16 +114,11 @@ async fn handle_peer_request(
     command: PeerCommand,
     node_manager_tx: mpsc::Sender<NodeManagerCommand>,
 ) -> PeerResponse {
-    tracing::info!("Received peer command: {:?}", command);
     match command {
-        PeerCommand::Heartbeat {
-            peer_address,
-            broker_status,
-        } => {
-            tracing::info!("Received heartbeat from peer: {}", peer_address);
+        PeerCommand::Heartbeat { node_info } => {
             let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeManagerResponse>();
             let node_manager_command = NodeManagerCommand::Heartbeat {
-                peer_info: broker_status.clone(),
+                peer_info: node_info.clone(),
                 tx: oneshot_tx,
             };
 

@@ -1,6 +1,6 @@
 ip: "0.0.0.0"
-port: 5057
+port: 5076
 heartbeat_interval_ms: 7000
 mpsc_queue_size: 100
 base_path_for_data: "/tmp/walrs/data"
-peers: ["127.0.0.1:5056", "127.0.0.1:5058"]
+peers: ["127.0.0.1:5075"]

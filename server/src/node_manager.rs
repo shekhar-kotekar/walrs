@@ -80,7 +80,6 @@ impl NodeManager {
                     }
                 }
                 Some(command) = rx.recv() => {
-                    tracing::debug!("Received admin command: {:?}", command);
                     match command {
                         NodeManagerCommand::CreateTopic {topic} => {
                             tracing::info!("Creating topic: {:?}", topic);
@@ -136,7 +135,6 @@ impl NodeManager {
                             self.handle_get_partition_reader(topic_name, tx, cancellation_token.child_token()).await;
                         }
                         NodeManagerCommand::Heartbeat { peer_info, tx } => {
-                            tracing::info!("Received heartbeat from peer: {:?}", peer_info);
                             self.cluster_info.add_node(peer_info);
                             tx.send(NodeManagerResponse::HeartbeatAcknowledged).unwrap_or_else(|_| {
                                 tracing::warn!("Failed to send heartbeat acknowledgment.");
@@ -149,7 +147,6 @@ impl NodeManager {
                     break;
                 }
                 _ = self.heartbeat_interval.tick() => {
-                    tracing::info!("Sending heartbeat to cluster: {:?}", self.cluster_info);
                     let cluster_info = self.cluster_info.clone();
                     let self_address = format!("{}:{}", self.node_config.ip, self.node_config.port);
                     tokio::spawn(async move {heartbeat::send_heartbeat(self_address, cluster_info).await;});
