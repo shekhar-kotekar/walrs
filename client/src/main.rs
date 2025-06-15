@@ -2,6 +2,7 @@ use std::{collections::HashMap, thread::sleep};
 
 use commons::{
     admin::ClusterAdmin,
+    consumer::Consumer,
     models::{AckLevel, AdminCommand, AdminResponse, Message, ProducerResponse, Topic},
     producer::Producer,
 };
@@ -29,8 +30,9 @@ async fn main() {
         String::from("127.0.0.1:5077"),
     ];
 
-    let mut producer: Producer = Producer::new(brokers.clone());
-    let cluster_admin = ClusterAdmin { brokers };
+    let cluster_admin = ClusterAdmin {
+        brokers: brokers.clone(),
+    };
 
     let response = cluster_admin
         .send_command_and_get_response(&admin_command)
@@ -52,50 +54,10 @@ async fn main() {
             {
                 AdminResponse::TopicInfo { topics } => {
                     tracing::info!("Topic info retrieved successfully: {:?}", topics);
-                    let messages = vec![
-                        Message {
-                            key: Some("key1".to_string()),
-                            payload: "this is first message".as_bytes().to_vec(),
-                            headers: HashMap::from([(
-                                "first_msg_header".to_string(),
-                                "value1".to_string(),
-                            )]),
-                        },
-                        Message {
-                            key: Some("key2".to_string()),
-                            payload: "this is second message".as_bytes().to_vec(),
-                            headers: HashMap::from([("name".to_string(), "Shekhar".to_string())]),
-                        },
-                        Message {
-                            key: None,
-                            payload: "this is third message".as_bytes().to_vec(),
-                            headers: HashMap::from([
-                                ("name".to_string(), "foo bar".to_string()),
-                                ("age".to_string(), "23".to_string()),
-                            ]),
-                        },
-                    ];
-
-                    producer.send_batch(topic.name.clone(), messages);
-                    match producer.flush().await {
-                        Ok(response) => match response {
-                            ProducerResponse::MessagesPersisted { count } => {
-                                tracing::info!("Messages persisted successfully: {}", count)
-                            }
-                            ProducerResponse::Error { message } => {
-                                tracing::error!("Failed to persist messages: {}", message);
-                            }
-                            _ => {
-                                tracing::error!("Unexpected response type: {:?}", response);
-                            }
-                        },
-                        Err(e) => {
-                            tracing::error!("Failed to send messages: {}", e);
-                        }
-                    }
+                    send_messages(brokers.clone(), &topic.name).await;
+                    read_messages(brokers, &topic.name).await;
                 }
                 AdminResponse::Error(err) => tracing::error!(err),
-
                 _ => {
                     tracing::error!("Unexpected response type: {:?}", response);
                 }
@@ -109,4 +71,58 @@ async fn main() {
         }
     }
     tracing::info!("Cluster admin command executed successfully.");
+}
+
+async fn read_messages(brokers: Vec<String>, topic: &str) {
+    let consumer = Consumer::new(brokers.clone());
+    match consumer.fetch_messages(topic).await {
+        Ok(messages) => {
+            tracing::info!("Fetched messages: {:?}", messages);
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch messages: {}", e);
+        }
+    }
+}
+
+async fn send_messages(brokers: Vec<String>, topic: &str) {
+    let mut producer: Producer = Producer::new(brokers.clone());
+    let messages = vec![
+        Message {
+            key: Some("key1".to_string()),
+            payload: "this is first message".as_bytes().to_vec(),
+            headers: HashMap::from([("first_msg_header".to_string(), "value1".to_string())]),
+        },
+        Message {
+            key: Some("key2".to_string()),
+            payload: "this is second message".as_bytes().to_vec(),
+            headers: HashMap::from([("name".to_string(), "Shekhar".to_string())]),
+        },
+        Message {
+            key: None,
+            payload: "this is third message".as_bytes().to_vec(),
+            headers: HashMap::from([
+                ("name".to_string(), "foo bar".to_string()),
+                ("age".to_string(), "23".to_string()),
+            ]),
+        },
+    ];
+
+    producer.send_batch(topic.to_owned(), messages);
+    match producer.flush().await {
+        Ok(response) => match response {
+            ProducerResponse::MessagesPersisted { count } => {
+                tracing::info!("Messages persisted successfully: {}", count)
+            }
+            ProducerResponse::Error { message } => {
+                tracing::error!("Failed to persist messages: {}", message);
+            }
+            _ => {
+                tracing::error!("Unexpected response type: {:?}", response);
+            }
+        },
+        Err(e) => {
+            tracing::error!("Failed to send messages: {}", e);
+        }
+    }
 }

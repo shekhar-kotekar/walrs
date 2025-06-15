@@ -1,5 +1,9 @@
 target/
 
-.vscode/
+logs/
+*.log
 
+.idea/
+.vscode/
+.zed/
 .DS_Store

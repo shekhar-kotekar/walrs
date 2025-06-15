@@ -185,8 +185,6 @@ async fn handle_consumer_request(
     tracing::info!("Received consumer command: {:?}", command);
     match command {
         ConsumerCommand::FetchMessages { topic, offset: _ } => {
-            tracing::info!("Fetching messages from topic: {}", topic);
-
             let (nm_oneshot_tx, nm_oneshot_rx) = oneshot::channel::<NodeManagerResponse>();
             let nm_command = NodeManagerCommand::GetPartitionReader {
                 topic_name: topic.clone(),

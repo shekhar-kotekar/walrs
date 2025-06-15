@@ -3,6 +3,7 @@ use bytes::BytesMut;
 use std::{
     fmt::Debug,
     hash::{DefaultHasher, Hash, Hasher},
+    io::{Error, ErrorKind},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -11,11 +12,12 @@ use tokio::{
 use tracing_subscriber::fmt::format::FmtSpan;
 
 use crate::models::{
-    AdminCommand, AdminResponse, PeerCommand, PeerResponse, ProducerCommand, ProducerResponse,
-    WalrsCommand, WalrsResponse,
+    AdminCommand, AdminResponse, ConsumerCommand, ConsumerResponse, PeerCommand, PeerResponse,
+    ProducerCommand, ProducerResponse, WalrsCommand, WalrsResponse,
 };
 
 pub mod admin;
+pub mod consumer;
 pub mod models;
 pub mod producer;
 
@@ -134,6 +136,26 @@ pub async fn send_and_receive_producer_command(
         Err(e) => ProducerResponse::Error {
             message: format!("Failed to send command: {}", e),
         },
+    }
+}
+
+pub async fn send_and_receive_consumer_command(
+    command: ConsumerCommand,
+    peer_address: &str,
+) -> Result<ConsumerResponse, Error> {
+    let walrs_command = WalrsCommand::Consumer(command);
+    match send_message::<WalrsCommand, WalrsResponse>(&walrs_command, peer_address).await {
+        Ok(response) => match response {
+            WalrsResponse::Consumer(consumer_response) => Ok(consumer_response),
+            response => Err(Error::new(
+                ErrorKind::Other,
+                format!("Unexpected response type: {:?}", response),
+            )),
+        },
+        Err(e) => Err(Error::new(
+            ErrorKind::Other,
+            format!("Failed to send command: {}", e),
+        )),
     }
 }
 
