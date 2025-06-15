@@ -58,7 +58,7 @@ async fn main() {
 fn get_node_config(pod_ip: &str) -> NodeConfig {
     let config_file_path = std::env::var("NODE_CONFIG_FILE").unwrap_or_else(|_| {
         tracing::warn!(
-            "BROKER_CONFIG_FILE environment variable not set. Using default config file path."
+            "NODE_CONFIG_FILE environment variable not set. Using default config file path."
         );
         "./configs/broker_conf.yml".to_string()
     });

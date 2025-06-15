@@ -5,7 +5,10 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    handlers::create_topic::{self, TopicManagerResponse},
+    handlers::{
+        create_topic::{self, TopicManagerResponse},
+        heartbeat,
+    },
     models::{ClusterInfo, NodeConfig, PartitionCommand},
     partition_managers::partition_reader::PartitionReader,
 };
@@ -140,9 +143,9 @@ impl NodeManager {
                 }
                 _ = self.heartbeat_interval.tick() => {
                     tracing::info!("Sending heartbeat to cluster: {:?}", self.cluster_info);
-                    // let cluster_info = self.cluster_info.clone();
-                    // let self_address = self.address.clone();
-                    // tokio::spawn(async move {heartbeat::send_heartbeat(self_address, cluster_info).await;});
+                    let cluster_info = self.cluster_info.clone();
+                    let self_address = format!("{}:{}", self.node_config.ip, self.node_config.port);
+                    tokio::spawn(async move {heartbeat::send_heartbeat(self_address, cluster_info).await;});
                 }
             }
         }
