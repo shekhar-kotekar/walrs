@@ -1,13 +1,13 @@
 [package]
 name = "client"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
-common = { path = "../common" }
-toml = "0.8.19"
+commons = { path = "../commons" }
+tokio = { version = "1.45.1", features = ["full"] }
+bincode = "2.0.1"
+clap = "4.5.40"
+serde = "1.0.219"
+toml = "0.8.23"
 tracing = "0.1.41"
-clap = { version = "4.5.16", features = ["derive"] }
-bincode = "1.3.3"
-serde = { version = "1.0.216", features = ["derive"] }
-tokio = { version = "1.42.0", features = ["full"] }
