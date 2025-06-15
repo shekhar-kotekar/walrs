@@ -2,7 +2,7 @@ use std::{collections::HashMap, thread::sleep};
 
 use commons::{
     admin::ClusterAdmin,
-    models::{AckLevel, AdminCommand, AdminResponse, Message, Topic},
+    models::{AckLevel, AdminCommand, AdminResponse, Message, ProducerResponse, Topic},
     producer::Producer,
 };
 
@@ -11,7 +11,7 @@ async fn main() {
     commons::init_tracing(None);
 
     let topic: Topic = Topic::new(
-        "test_topic".into(),
+        "client_topic_1".into(),
         None,
         None,
         Some(60),
@@ -56,7 +56,10 @@ async fn main() {
                         Message {
                             key: Some("key1".to_string()),
                             payload: "this is first message".as_bytes().to_vec(),
-                            headers: HashMap::from([("header1".to_string(), "value1".to_string())]),
+                            headers: HashMap::from([(
+                                "first_msg_header".to_string(),
+                                "value1".to_string(),
+                            )]),
                         },
                         Message {
                             key: Some("key2".to_string()),
@@ -66,30 +69,40 @@ async fn main() {
                         Message {
                             key: None,
                             payload: "this is third message".as_bytes().to_vec(),
-                            headers: HashMap::from([("name".to_string(), "foo bar".to_string())]),
+                            headers: HashMap::from([
+                                ("name".to_string(), "foo bar".to_string()),
+                                ("age".to_string(), "23".to_string()),
+                            ]),
                         },
                     ];
 
                     producer.send_batch(topic.name.clone(), messages);
                     match producer.flush().await {
-                        Ok(response) => {
-                            tracing::info!("Messages sent successfully: {:?}", response)
-                        }
+                        Ok(response) => match response {
+                            ProducerResponse::MessagesPersisted { count } => {
+                                tracing::info!("Messages persisted successfully: {}", count)
+                            }
+                            ProducerResponse::Error { message } => {
+                                tracing::error!("Failed to persist messages: {}", message);
+                            }
+                            _ => {
+                                tracing::error!("Unexpected response type: {:?}", response);
+                            }
+                        },
                         Err(e) => {
                             tracing::error!("Failed to send messages: {}", e);
                         }
                     }
                 }
-                AdminResponse::Error(err) => {
-                    tracing::error!("Failed to retrieve topic info: {}", err);
-                }
+                AdminResponse::Error(err) => tracing::error!(err),
+
                 _ => {
                     tracing::error!("Unexpected response type: {:?}", response);
                 }
             }
         }
         AdminResponse::Error(err) => {
-            tracing::error!("Failed to execute cluster admin command: {}", err);
+            tracing::error!(err);
         }
         _ => {
             tracing::error!("Unexpected response type: {:?}", response);

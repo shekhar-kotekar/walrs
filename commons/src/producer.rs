@@ -42,12 +42,29 @@ impl Producer {
             let mapped_messages: HashMap<String, (String, Vec<Message>)> =
                 self.map_messages_to_nodes(&topic_info);
 
+            let mut total_message_persisted = 0;
             for (node_address, (topic_name, messages)) in mapped_messages {
-                self.send_messages_to_node(&node_address, topic_name, messages)
+                let result = self
+                    .send_messages_to_node(&node_address, topic_name, messages)
                     .await;
+                match result {
+                    ProducerResponse::MessagesPersisted { count } => {
+                        total_message_persisted += count;
+                    }
+                    other => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!(
+                                "Failed to send messages to node {}: {:?}",
+                                node_address, other
+                            ),
+                        ));
+                    }
+                }
             }
-            Ok(ProducerResponse::Error {
-                message: String::from("Not implemented"),
+            self.buffer.clear();
+            Ok(ProducerResponse::MessagesPersisted {
+                count: total_message_persisted,
             })
         }
     }
@@ -57,12 +74,12 @@ impl Producer {
         node_address: &str,
         topic_name: String,
         messages: Vec<Message>,
-    ) {
+    ) -> ProducerResponse {
         let producer_command = ProducerCommand::WriteMessages {
             topic: topic_name,
             messages,
         };
-        send_and_receive_producer_command(producer_command, node_address).await;
+        send_and_receive_producer_command(producer_command, node_address).await
     }
 
     fn map_messages_to_nodes(

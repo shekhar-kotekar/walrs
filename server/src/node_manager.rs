@@ -192,7 +192,7 @@ impl NodeManager {
         topic_name: String,
         tx: oneshot::Sender<NodeManagerResponse>,
     ) {
-        tracing::info!("Getting partition writer for topic: {}", topic_name);
+        tracing::debug!("Getting partition writer for topic: {}", topic_name);
         let partition_writer: Option<mpsc::Sender<PartitionCommand>> = self
             .local_partition_writers
             .iter()

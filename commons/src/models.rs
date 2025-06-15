@@ -59,10 +59,9 @@ pub enum AdminResponse {
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
 pub enum ProducerResponse {
-    MessagesSent,
     Error { message: String },
-    RequestAccepted,
     MessagesPersisted { count: u8 },
+    RequestAccepted,
 }
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]

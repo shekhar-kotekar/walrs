@@ -80,7 +80,6 @@ impl MainListener {
             _ = async {
                 match commons::read_from_socket::<WalrsCommand>(&mut stream).await {
                     Ok(command) => {
-                        tracing::info!("Received command: {:?}", command);
                         let response: WalrsResponse = match command {
                             WalrsCommand::Admin(admin_command) =>{
                                 WalrsResponse::Admin(admin::handle_admin_request(admin_command, node_manager_tx).await)
@@ -261,7 +260,6 @@ async fn handle_producer_request(
             }
             match oneshot_rx.await {
                 Ok(NodeManagerResponse::PartitionWriter { writer }) => {
-                    tracing::info!("Got partition writer for topic.");
                     let (pw_oneshot_tx, pw_oneshot_rx) =
                         oneshot::channel::<PartitionWriterResponse>();
                     let partition_command: PartitionCommand = PartitionCommand::WriteMessages {
@@ -279,7 +277,7 @@ async fn handle_producer_request(
                         }
                         Err(err) => ProducerResponse::Error {
                             message: format!(
-                                "Failed to receive response from partition writer: {}",
+                                "Response not received from partition writer: {}",
                                 err
                             ),
                         },

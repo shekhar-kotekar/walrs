@@ -56,10 +56,12 @@ impl PartitionWriter {
                         PartitionCommand::WriteMessages { messages, tx } => {
                             let message_count = messages.len() as u8;
                             for message in messages {
+                                //TODO: write message headers and key if they exist
                                 // write each message payload in timestamp in epoch format # followed by actualy payload
                                 let timestamp = chrono::Utc::now().timestamp().to_be_bytes();
                                 file.write_all(&timestamp).await.expect("Failed to write timestamp to partition");
                                 file.write_all(b"#").await.expect("Failed to write separator to partition");
+
                                 file.write_all(&message.payload).await.expect("Failed to write message to partition");
                                 file.write_all(b"\n").await.expect("Failed to write newline to partition");
                             }
