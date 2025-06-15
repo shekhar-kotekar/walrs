@@ -31,6 +31,7 @@ async fn main() {
 
     let mut cluster_info = ClusterInfo::new();
     cluster_info.add_node(node_info);
+    cluster_info.set_peers(node_config.peers.clone());
 
     let task_tracker = TaskTracker::new();
     let cancellation_token = CancellationToken::new();

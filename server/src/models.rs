@@ -32,22 +32,14 @@ impl ClusterInfo {
             nodes: HashMap::new(),
         }
     }
-    // pub fn with_peers(mut self, peers: Vec<String>) -> Self {
-    //     self.nodes = peers
-    //         .into_iter()
-    //         .map(|peer| {
-    //             let node_info = NodeInfo {
-    //                 registed_topics: Vec::new(),
-    //                 address: peer.clone(),
-    //             };
-    //             (peer, node_info)
-    //         })
-    //         .collect();
-    //     self
-    // }
-
     pub fn add_node(&mut self, node_info: NodeInfo) {
         self.nodes.insert(node_info.address.clone(), node_info);
+    }
+
+    pub fn set_peers(&mut self, nodes: Vec<String>) {
+        for node in nodes {
+            self.add_node(NodeInfo::new(node));
+        }
     }
 }
 
