@@ -1,5 +1,9 @@
-use bincode::{Decode, Encode};
+use bincode::{Decode, Encode, error::DecodeError};
 use bytes::BytesMut;
+use std::{
+    fmt::Debug,
+    hash::{DefaultHasher, Hash, Hasher},
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -27,6 +31,25 @@ pub fn init_tracing(log_level: Option<tracing::Level>) {
     tracing::info!("Tracing enabled!");
 }
 
+pub fn hash_code<T: Hash>(t: &T) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    t.hash(&mut hasher);
+    hasher.finish()
+}
+
+pub fn to_bytes<T: Encode + Debug>(value: &T) -> Vec<u8> {
+    bincode::encode_to_vec(value, bincode::config::standard()).unwrap_or_else(|_| {
+        format!("Failed to serialize value: {:?}", value)
+            .as_bytes()
+            .to_vec()
+    })
+}
+
+pub fn from_bytes<T: Decode<()>>(bytes: &[u8]) -> Result<T, DecodeError> {
+    tracing::debug!("deserializing to type: {}", std::any::type_name::<T>());
+    bincode::decode_from_slice(bytes, bincode::config::standard()).map(|(value, _)| value)
+}
+
 pub async fn read_from_socket<T: Decode<()>>(socket: &mut TcpStream) -> Result<T, std::io::Error> {
     let mut buffer = BytesMut::with_capacity(1024);
     let bytes_read = socket.read_buf(&mut buffer).await.ok();
@@ -52,6 +75,23 @@ pub async fn read_from_socket<T: Decode<()>>(socket: &mut TcpStream) -> Result<T
     Ok(decoded)
 }
 
+pub async fn send_message<T: Encode, ResponseType: Decode<()>>(
+    data: &T,
+    peer_address: &String,
+) -> Result<ResponseType, std::io::Error> {
+    match TcpStream::connect(peer_address).await {
+        Ok(mut stream) => {
+            tracing::debug!("Connected to peer at {}", peer_address);
+            write_to_socket(data, &mut stream).await?;
+            read_from_socket::<ResponseType>(&mut stream).await
+        }
+        Err(e) => {
+            tracing::error!("Failed to connect to peer at {}: {}", peer_address, e);
+            Err(e)
+        }
+    }
+}
+
 pub async fn write_to_socket<T: Encode>(
     data: &T,
     socket: &mut TcpStream,
@@ -64,7 +104,7 @@ pub async fn write_to_socket<T: Encode>(
 #[cfg(test)]
 mod lib {
 
-    use crate::models::{AdminCommand, WalrsCommand};
+    use crate::models::{AdminCommand, Topic, WalrsCommand};
 
     use super::*;
     use tokio::{io::AsyncWriteExt, net::TcpListener};
@@ -78,11 +118,16 @@ mod lib {
 
         tokio::spawn(async move {
             let mut sender_stream = TcpStream::connect(address).await.unwrap();
+            let topic: Topic = Topic::new(
+                "test_topic".into(),
+                None,
+                None,
+                Some(60),
+                Some(models::AckLevel::Leader),
+            )
+            .unwrap();
             let command_to_write = WalrsCommand::Admin(AdminCommand::CreateTopic {
-                name: "test_topic".into(),
-                num_partitions: 3,
-                replication_factor: 2,
-                retention_period_ms: Some(60000),
+                topic: topic.clone(),
             });
             write_to_socket::<WalrsCommand>(&command_to_write, &mut sender_stream)
                 .await
@@ -96,17 +141,11 @@ mod lib {
             .expect("Failed to deserialize command");
 
         tracing::debug!("Deserialized command: {:?}", deserialized_command);
-        if let WalrsCommand::Admin(AdminCommand::CreateTopic {
-            name,
-            num_partitions,
-            replication_factor,
-            retention_period_ms,
-        }) = deserialized_command
-        {
-            assert_eq!(name, "test_topic");
-            assert_eq!(num_partitions, 3);
-            assert_eq!(replication_factor, 2);
-            assert_eq!(retention_period_ms, Some(60000));
+        if let WalrsCommand::Admin(AdminCommand::CreateTopic { topic }) = deserialized_command {
+            assert_eq!(topic.name, "test_topic");
+            assert_eq!(topic.num_partitions, 3);
+            assert_eq!(topic.replication_factor, 3);
+            assert_eq!(topic.retention_period_minutes, 60);
         } else {
             panic!("Deserialized command is not of type AdminCommand::CreateTopic");
         }
@@ -118,14 +157,21 @@ mod lib {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
 
+        let topic: Topic = Topic::new(
+            "test_topic".into(),
+            None,
+            None,
+            Some(60),
+            Some(models::AckLevel::Leader),
+        )
+        .unwrap();
+
+        let topic_clone = topic.clone();
+
         tokio::spawn(async move {
             let mut sender_stream = TcpStream::connect(address).await.unwrap();
-            let create_topic_command = WalrsCommand::Admin(AdminCommand::CreateTopic {
-                name: "test_topic".into(),
-                num_partitions: 3,
-                replication_factor: 2,
-                retention_period_ms: Some(60000),
-            });
+            let create_topic_command =
+                WalrsCommand::Admin(AdminCommand::CreateTopic { topic: topic_clone });
             let serialized_command =
                 bincode::encode_to_vec(&create_topic_command, bincode::config::standard()).unwrap();
             sender_stream.write_all(&serialized_command).await.unwrap();
@@ -143,17 +189,11 @@ mod lib {
             .expect("Failed to deserialize command");
 
         tracing::debug!("Deserialized command: {:?}", deserialized_command);
-        if let WalrsCommand::Admin(AdminCommand::CreateTopic {
-            name,
-            num_partitions,
-            replication_factor,
-            retention_period_ms,
-        }) = deserialized_command
-        {
-            assert_eq!(name, "test_topic");
-            assert_eq!(num_partitions, 3);
-            assert_eq!(replication_factor, 2);
-            assert_eq!(retention_period_ms, Some(60000));
+        if let WalrsCommand::Admin(AdminCommand::CreateTopic { topic }) = deserialized_command {
+            assert_eq!(topic.name, "test_topic");
+            assert_eq!(topic.num_partitions, 3);
+            assert_eq!(topic.replication_factor, 3);
+            assert_eq!(topic.retention_period_minutes, 60);
         } else {
             panic!("Deserialized command is not of type AdminCommand::CreateTopic");
         }
