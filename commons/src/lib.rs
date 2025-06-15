@@ -10,10 +10,14 @@ use tokio::{
 };
 use tracing_subscriber::fmt::format::FmtSpan;
 
-use crate::models::{PeerCommand, PeerResponse, WalrsCommand, WalrsResponse};
+use crate::models::{
+    AdminCommand, AdminResponse, PeerCommand, PeerResponse, ProducerCommand, ProducerResponse,
+    WalrsCommand, WalrsResponse,
+};
 
 pub mod admin;
 pub mod models;
+pub mod producer;
 
 pub fn init_tracing(log_level: Option<tracing::Level>) {
     // let file_appender = tracing_appender::rolling::daily("/tmp/kraft-rs/logs/", "kraft-rs.log");
@@ -69,7 +73,7 @@ pub async fn read_from_socket<T: Decode<()>>(socket: &mut TcpStream) -> Result<T
 
 pub async fn send_message<T: Encode + Debug, ResponseType: Decode<()>>(
     data: &T,
-    peer_address: &String,
+    peer_address: &str,
 ) -> Result<ResponseType, std::io::Error> {
     match TcpStream::connect(peer_address).await {
         Ok(mut stream) => {
@@ -85,7 +89,7 @@ pub async fn send_message<T: Encode + Debug, ResponseType: Decode<()>>(
 
 pub async fn send_and_receive_peer_command(
     command: PeerCommand,
-    peer_address: &String,
+    peer_address: &str,
 ) -> PeerResponse {
     let walrs_command = WalrsCommand::Peer(command);
     match send_message::<WalrsCommand, WalrsResponse>(&walrs_command, peer_address).await {
@@ -96,6 +100,38 @@ pub async fn send_and_receive_peer_command(
             },
         },
         Err(e) => PeerResponse::Error {
+            message: format!("Failed to send command: {}", e),
+        },
+    }
+}
+
+pub async fn send_and_receive_admin_command(
+    command: AdminCommand,
+    peer_address: &str,
+) -> AdminResponse {
+    let walrs_command = WalrsCommand::Admin(command.clone());
+    match send_message::<WalrsCommand, WalrsResponse>(&walrs_command, peer_address).await {
+        Ok(response) => match response {
+            WalrsResponse::Admin(admin_response) => admin_response,
+            other => AdminResponse::Error(format!("Unexpected response type: {:?}", other)),
+        },
+        Err(e) => AdminResponse::Error(format!("Failed to send command: {}", e)),
+    }
+}
+
+pub async fn send_and_receive_producer_command(
+    command: ProducerCommand,
+    peer_address: &str,
+) -> ProducerResponse {
+    let walrs_command = WalrsCommand::Producer(command);
+    match send_message::<WalrsCommand, WalrsResponse>(&walrs_command, peer_address).await {
+        Ok(response) => match response {
+            WalrsResponse::Producer(producer_response) => producer_response,
+            response => ProducerResponse::Error {
+                message: format!("Unexpected response type: {:?}", response),
+            },
+        },
+        Err(e) => ProducerResponse::Error {
             message: format!("Failed to send command: {}", e),
         },
     }

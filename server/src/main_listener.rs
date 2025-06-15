@@ -255,10 +255,9 @@ async fn handle_producer_request(
                 tx: oneshot_tx,
             };
             if let Err(err) = node_manager_tx.send(command).await {
-                return ProducerResponse::Error(format!(
-                    "Failed to send command to node manager: {}",
-                    err
-                ));
+                return ProducerResponse::Error {
+                    message: format!("Failed to send command to node manager: {}", err),
+                };
             }
             match oneshot_rx.await {
                 Ok(NodeManagerResponse::PartitionWriter { writer }) => {
@@ -270,26 +269,28 @@ async fn handle_producer_request(
                         tx: pw_oneshot_tx,
                     };
                     if let Err(err) = writer.send(partition_command).await {
-                        return ProducerResponse::Error(format!(
-                            "Failed to send command to partition writer: {}",
-                            err
-                        ));
+                        return ProducerResponse::Error {
+                            message: format!("Failed to send command to partition writer: {}", err),
+                        };
                     }
                     match pw_oneshot_rx.await {
                         Ok(PartitionWriterResponse::MessagesPersisted { count }) => {
                             ProducerResponse::MessagesPersisted { count }
                         }
-                        Err(err) => ProducerResponse::Error(format!(
-                            "Failed to receive response from partition writer: {}",
-                            err
-                        )),
+                        Err(err) => ProducerResponse::Error {
+                            message: format!(
+                                "Failed to receive response from partition writer: {}",
+                                err
+                            ),
+                        },
                     }
                 }
-                Ok(_) => ProducerResponse::Error("Unexpected response from node manager".into()),
-                Err(err) => ProducerResponse::Error(format!(
-                    "Failed to receive response from node manager: {}",
-                    err
-                )),
+                Ok(_) => ProducerResponse::Error {
+                    message: "Unexpected response from node manager".into(),
+                },
+                Err(err) => ProducerResponse::Error {
+                    message: format!("Failed to receive response from node manager: {}", err),
+                },
             }
         }
     }

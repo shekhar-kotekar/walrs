@@ -83,19 +83,11 @@ impl NodeManager {
                                 broker_to_topic_creator_tx.clone(),
                             ).await;
                         }
-                        NodeManagerCommand::GetTopicInfo { topic_name, tx } => {
-                            let topic_info: Option<Topic> = self.topic_metadata.iter()
-                                .find(|(key, _)| key.starts_with(&topic_name))
-                                .map(|(_, topic)| topic.clone());
-                            if let Some(topic) = topic_info {
-                                tx.send(NodeManagerResponse::TopicInfo { topic }).unwrap_or_else(|_| {
-                                    tracing::warn!("Failed to send topic info response.");
-                                });
-                            } else {
-                                tx.send(NodeManagerResponse::NotFound).unwrap_or_else(|_| {
-                                    tracing::warn!("Failed to send topic not found response.");
-                                });
-                            }
+                        NodeManagerCommand::GetTopicInfo { topic_names, tx } => {
+                            let topics = self.get_topic_info(topic_names).await;
+                            tx.send(NodeManagerResponse::TopicInfo { topics }).unwrap_or_else(|_| {
+                                tracing::warn!("Failed to send topic info response.");
+                            });
                         }
                         NodeManagerCommand::CreatePartitionWriter {
                             topic_name,
@@ -137,6 +129,19 @@ impl NodeManager {
             }
         }
         tracing::info!("Node manager stopped.");
+    }
+
+    async fn get_topic_info(&self, topic_names: Vec<String>) -> Vec<Topic> {
+        self.topic_metadata
+            .iter()
+            .filter_map(|(_, topic)| {
+                if topic_names.contains(&topic.name) {
+                    Some(topic.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     async fn handle_create_topic(
@@ -311,7 +316,7 @@ pub enum NodeManagerCommand {
         tx: oneshot::Sender<NodeManagerResponse>,
     },
     GetTopicInfo {
-        topic_name: String,
+        topic_names: Vec<String>,
         tx: oneshot::Sender<NodeManagerResponse>,
     },
     GetPartitionWriter {
@@ -331,7 +336,7 @@ pub enum NodeManagerCommand {
 #[derive(Debug)]
 pub enum NodeManagerResponse {
     TopicInfo {
-        topic: Topic,
+        topics: Vec<Topic>,
     },
     NotFound,
     Error {

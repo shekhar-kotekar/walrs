@@ -41,15 +41,15 @@ async fn main() {
             );
             sleep(std::time::Duration::from_millis(500));
             let get_topic_info_command = AdminCommand::GetTopicInfo {
-                topic_name: topic.name.clone(),
+                topic_names: vec![topic.name.clone()],
             };
 
             match cluster_admin
                 .send_command_and_get_response(&get_topic_info_command)
                 .await
             {
-                AdminResponse::TopicInfo { topic } => {
-                    tracing::info!("Topic info retrieved successfully: {:?}", topic);
+                AdminResponse::TopicInfo { topics } => {
+                    tracing::info!("Topic info retrieved successfully: {:?}", topics);
                 }
                 AdminResponse::Error(err) => {
                     tracing::error!("Failed to retrieve topic info: {}", err);

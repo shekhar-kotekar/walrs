@@ -21,9 +21,9 @@ pub async fn handle_admin_request(
                 });
             AdminResponse::RequestAccepted
         }
-        AdminCommand::GetTopicInfo { topic_name } => {
+        AdminCommand::GetTopicInfo { topic_names } => {
             let (tx, rx) = oneshot::channel::<NodeManagerResponse>();
-            let command = NodeManagerCommand::GetTopicInfo { topic_name, tx };
+            let command = NodeManagerCommand::GetTopicInfo { topic_names, tx };
             node_manager_tx.send(command).await.unwrap_or_else(|err| {
                 tracing::error!(
                     "Failed to send GetTopicInfo command to node manager: {}",
@@ -32,7 +32,9 @@ pub async fn handle_admin_request(
             });
             match rx.await {
                 Ok(response) => match response {
-                    NodeManagerResponse::TopicInfo { topic } => AdminResponse::TopicInfo { topic },
+                    NodeManagerResponse::TopicInfo { topics } => {
+                        AdminResponse::TopicInfo { topics }
+                    }
                     other => AdminResponse::Error(format!("Unexpected response type: {:?}", other)),
                 },
                 Err(err) => {

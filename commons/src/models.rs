@@ -12,7 +12,7 @@ pub struct Message {
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
 pub enum AdminCommand {
     CreateTopic { topic: Topic },
-    GetTopicInfo { topic_name: String },
+    GetTopicInfo { topic_names: Vec<String> },
 }
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
@@ -52,7 +52,7 @@ pub enum ConsumerResponse {
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
 pub enum AdminResponse {
-    TopicInfo { topic: Topic },
+    TopicInfo { topics: Vec<Topic> },
     Error(String),
     RequestAccepted,
 }
@@ -60,7 +60,7 @@ pub enum AdminResponse {
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
 pub enum ProducerResponse {
     MessagesSent,
-    Error(String),
+    Error { message: String },
     RequestAccepted,
     MessagesPersisted { count: u8 },
 }
@@ -133,6 +133,10 @@ pub struct Topic {
     pub status: TopicStatus,
 }
 
+const DEFAULT_NUM_PARTITIONS: u8 = 3;
+const DEFAULT_REPLICATION_FACTOR: u8 = 3;
+const DEFAULT_RETENTION_PERIOD_MINUTES: u16 = 60;
+
 impl Topic {
     pub fn new(
         name: String,
@@ -143,9 +147,10 @@ impl Topic {
     ) -> Result<Self, String> {
         let new_topic = Self {
             name,
-            num_partitions: num_partitions.unwrap_or(3),
-            replication_factor: replication_factor.unwrap_or(3),
-            retention_period_minutes: retention_period_minutes.unwrap_or(60),
+            num_partitions: num_partitions.unwrap_or(DEFAULT_NUM_PARTITIONS),
+            replication_factor: replication_factor.unwrap_or(DEFAULT_REPLICATION_FACTOR),
+            retention_period_minutes: retention_period_minutes
+                .unwrap_or(DEFAULT_RETENTION_PERIOD_MINUTES),
             ack_level: ack_level.unwrap_or(AckLevel::Leader),
             partitions: Vec::new(),
             status: TopicStatus::CreationInProgress,
@@ -183,15 +188,6 @@ impl Topic {
         Ok(())
     }
 }
-
-// #[derive(Debug, Clone, Encode, Decode)]
-// pub struct TopicMetadata {
-//     pub name: String,
-//     pub replication_factor: u8,
-//     pub retention_period_minutes: u16,
-//     pub ack_level: AckLevel,
-//     pub partitions: Vec<PartitionInfo>,
-// }
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq)]
 pub struct PartitionInfo {
