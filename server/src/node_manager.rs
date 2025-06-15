@@ -71,6 +71,7 @@ impl NodeManager {
                         }
                         TopicManagerResponse::TopicCreationFailed { topic_name, error } => {
                             tracing::error!("Error creating topic {}: {}", topic_name, error);
+                            self.topic_metadata.remove(&topic_name);
                         }
                     }
                 }
@@ -82,7 +83,7 @@ impl NodeManager {
                                 tracing::warn!("Topic {} already exists.", topic.name);
                             } else {
                                 let topic_creator_cancellation_token = cancellation_token.child_token();
-                                let node_address_clone = self.node_config.ip.clone();
+                                let node_address_clone = self.node_config.address.clone();
                                 let local_data_dir_path = self.node_config.base_path_for_data.clone();
                                 let cluster_info = self.cluster_info.clone();
 
@@ -104,7 +105,6 @@ impl NodeManager {
                             }
                         }
                         NodeManagerCommand::GetTopicInfo { topic_name, tx } => {
-                            tracing::info!("Getting info for topic: {}", topic_name);
                             if let Some(topic) = self.topic_metadata.get(&topic_name) {
                                 tx.send(NodeManagerResponse::TopicInfo { topic: topic.clone() }).unwrap_or_else(|_| {
                                     tracing::warn!("Failed to send topic info response.");
@@ -146,7 +146,7 @@ impl NodeManager {
                 }
                 _ = self.heartbeat_interval.tick() => {
                     let cluster_info = self.cluster_info.clone();
-                    let self_address = format!("{}:{}", self.node_config.ip, self.node_config.port);
+                    let self_address = self.node_config.address.clone();
                     tokio::spawn(async move {heartbeat::send_heartbeat(self_address, cluster_info).await;});
                 }
             }

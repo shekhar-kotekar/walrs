@@ -1,5 +1,4 @@
-ip: "0.0.0.0"
-port: 5075
+address: "127.0.0.1:5075"
 heartbeat_interval_ms: 29000
 mpsc_queue_size: 100
 base_path_for_data: "/tmp/walrs/data"

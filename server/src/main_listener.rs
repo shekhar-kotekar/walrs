@@ -25,6 +25,7 @@ pub struct MainListener {
 
 impl MainListener {
     pub async fn start(&self, task_tracker: TaskTracker, cancellation_token: CancellationToken) {
+        tracing::info!("Starting main listener on: {}", self.address);
         let main_tcp_listener = TcpListener::bind(&self.address).await.unwrap();
         tracing::debug!("Listening on: {}", main_tcp_listener.local_addr().unwrap());
 
@@ -77,7 +78,6 @@ impl MainListener {
                 tracing::info!("Cancellation token cancelled. Stopped processing client request.");
             }
             _ = async {
-                tracing::debug!("Processing client request...");
                 match commons::read_from_socket::<WalrsCommand>(&mut stream).await {
                     Ok(command) => {
                         tracing::info!("Received command: {:?}", command);

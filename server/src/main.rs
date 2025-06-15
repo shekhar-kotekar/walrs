@@ -1,5 +1,3 @@
-use std::env;
-
 use commons::models::NodeInfo;
 use tokio::sync::mpsc;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
@@ -21,14 +19,11 @@ mod partition_managers;
 #[tokio::main]
 async fn main() {
     commons::init_tracing(Some(tracing::Level::DEBUG));
-    let pod_ip: String = env::var("POD_IP").expect("POD_IP environment variable not set.");
+    // let pod_ip: String = env::var("POD_IP").unwrap_or("127.0.0.1".to_string());
 
-    let node_config: NodeConfig = get_node_config(&pod_ip);
-
-    // let address: String = format!("{}:8085", pod_ip);
-    let address: String = format!("{}:{}", node_config.ip, node_config.port);
-
-    let node_info: NodeInfo = NodeInfo::new(address.clone());
+    let node_config: NodeConfig = get_node_config();
+    let node_address = node_config.address.clone();
+    let node_info: NodeInfo = NodeInfo::new(node_address.clone());
 
     let mut cluster_info = ClusterInfo::new();
     cluster_info.add_node(node_info);
@@ -48,7 +43,7 @@ async fn main() {
     });
 
     let main_listener = MainListener {
-        address,
+        address: node_address,
         node_manager_tx,
     };
     main_listener.start(task_tracker, cancellation_token).await;
@@ -56,7 +51,7 @@ async fn main() {
     tracing::info!("Main Exited.");
 }
 
-fn get_node_config(pod_ip: &str) -> NodeConfig {
+fn get_node_config() -> NodeConfig {
     let config_file_path = std::env::var("NODE_CONFIG_FILE").unwrap_or_else(|_| {
         tracing::warn!(
             "NODE_CONFIG_FILE environment variable not set. Using default config file path."
@@ -65,7 +60,6 @@ fn get_node_config(pod_ip: &str) -> NodeConfig {
     });
 
     let builder = NodeConfigBuilder::from_yaml_file(&config_file_path)
-        .expect("Failed to read node config from YAML file")
-        .ip(pod_ip.to_string());
+        .expect("Failed to read node config from YAML file");
     builder.build()
 }

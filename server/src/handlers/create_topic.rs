@@ -56,8 +56,8 @@ pub async fn create_topic(
             }
             // step 1: for p partitions and r replication factor, we need (p * r) different partition writers
             // example: if p = 3 and r = 2, we need 6 partition writers
-            let potential_peers_for_topic: HashMap<String, usize> =
-                find_peers_for_topic(&self_address, topic_clone.num_partitions, &cluster_info);
+            let selected_nodes_for_topic: HashMap<String, usize> =
+                find_nodes_for_topic(&self_address, topic_clone.num_partitions, &cluster_info);
             // step 2: create local partition writer for partition 0
             let local_partition_writer_cancellation_token = cancellation_token.child_token();
             let partition_zero = 0;
@@ -65,7 +65,7 @@ pub async fn create_topic(
             let partition_zero_tx: Option<mpsc::Sender<PartitionCommand>> = create_partition(&topic_clone.name,
                 partition_zero,
                 &self_address,
-                PartitionRole::Leader {followers: potential_peers_for_topic.clone()},
+                PartitionRole::Leader {followers: selected_nodes_for_topic.clone()},
                 &local_data_dir_path,
                 local_partition_writer_cancellation_token).await;
 
@@ -76,11 +76,11 @@ pub async fn create_topic(
                     let partition_zero_info = PartitionInfo {
                         number: partition_zero,
                         leader_address: self_address.clone(),
-                        follower_addresses: potential_peers_for_topic.keys().cloned().collect(),
+                        follower_addresses: selected_nodes_for_topic.keys().cloned().collect(),
                     };
                     let mut partitions: Vec<PartitionInfo> = vec![partition_zero_info];
 
-                    match create_remote_lead_partitions(&topic_clone.name, &self_address, potential_peers_for_topic).await {
+                    match create_remote_lead_partitions(&topic_clone.name, &self_address, selected_nodes_for_topic).await {
                         Ok(remote_partitions) => {
                             partitions.extend(remote_partitions);
                             topic_clone.add_partitions(partitions);
@@ -187,7 +187,7 @@ async fn create_remote_lead_partitions(
     Ok(partition_infos)
 }
 
-fn find_peers_for_topic(
+fn find_nodes_for_topic(
     self_address: &String,
     num_partitions: u8,
     cluster_info: &ClusterInfo,

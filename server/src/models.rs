@@ -52,8 +52,7 @@ pub enum PartitionCommand {
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct NodeConfig {
-    pub ip: String,
-    pub port: u16,
+    pub address: String,
     pub peers: Vec<String>,
     pub heartbeat_interval_ms: u16,
     pub mpsc_queue_size: usize,
@@ -61,8 +60,7 @@ pub struct NodeConfig {
 }
 
 pub struct NodeConfigBuilder {
-    ip: Option<String>,
-    port: u16,
+    address: String,
     heartbeat_interval_ms: u16,
     mpsc_max_queue_size: usize,
     base_path_for_data: String,
@@ -77,8 +75,7 @@ impl NodeConfigBuilder {
         let config: NodeConfig = serde_yml::from_reader(file)
             .map_err(|e| format!("Failed to read broker config from YAML file: {}", e))?;
         Ok(Self {
-            ip: None,
-            port: config.port,
+            address: config.address,
             heartbeat_interval_ms: config.heartbeat_interval_ms,
             mpsc_max_queue_size: config.mpsc_queue_size,
             base_path_for_data: config.base_path_for_data,
@@ -86,21 +83,14 @@ impl NodeConfigBuilder {
         })
     }
 
-    pub fn ip(mut self, ip: String) -> Self {
-        self.ip = Some(ip);
-        self
-    }
-
     pub fn build(self) -> NodeConfig {
-        let ip_address = self.ip.unwrap_or("0.0.0.0".to_string());
         let data_dir_path = format!(
             "{}/{}",
             self.base_path_for_data,
-            ip_address.replace(".", "_")
+            self.address.replace(".", "_"),
         );
         NodeConfig {
-            ip: ip_address,
-            port: self.port,
+            address: self.address,
             heartbeat_interval_ms: self.heartbeat_interval_ms,
             mpsc_queue_size: self.mpsc_max_queue_size,
             base_path_for_data: data_dir_path,
