@@ -10,6 +10,7 @@ use tokio::{
 };
 use tracing_subscriber::fmt::format::FmtSpan;
 
+pub mod admin;
 pub mod models;
 
 pub fn init_tracing(log_level: Option<tracing::Level>) {
