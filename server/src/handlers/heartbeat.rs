@@ -94,7 +94,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
+    // #[ignore]
     #[traced_test]
     async fn test_send_heartbeat() {
         let mut cluster_info = ClusterInfo::new();
