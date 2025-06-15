@@ -1,24 +1,8 @@
 use std::collections::HashMap;
 
-use bincode::{Decode, Encode};
-use commons::models::Message;
+use commons::models::{Message, NodeInfo};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
-
-#[derive(Debug, Clone, Encode, Decode)]
-pub struct NodeInfo {
-    pub registed_topics: Vec<String>,
-    pub address: String,
-}
-
-impl NodeInfo {
-    pub fn new(address: String) -> Self {
-        Self {
-            registed_topics: Vec::new(),
-            address,
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct ClusterInfo {
@@ -64,32 +48,6 @@ pub enum PartitionCommand {
         topic_name: String,
         tx: oneshot::Sender<PartitionReaderResponse>,
     },
-}
-
-#[derive(Debug, Encode, Decode)]
-pub enum PartitionRole {
-    Leader { followers: HashMap<String, usize> },
-    Follower { leader_address: String },
-}
-
-#[derive(Debug, Encode, Decode)]
-pub enum CommandToPeer {
-    CreatePartitionWriter {
-        topic_name: String,
-        partition_number: u8,
-        role: PartitionRole,
-    },
-    Heartbeat {
-        peer_listener_address: String,
-        broker_status: NodeInfo,
-    },
-}
-
-#[derive(Debug, Encode, Decode)]
-pub enum PeerResponse {
-    PartitionWriterCreated,
-    HeartbeatReceived,
-    Error { message: String },
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]

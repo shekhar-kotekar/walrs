@@ -1,6 +1,7 @@
+use commons::models::{PeerCommand, PeerResponse};
 use tokio::io::AsyncWriteExt;
 
-use crate::models::{ClusterInfo, CommandToPeer, PeerResponse};
+use crate::models::ClusterInfo;
 
 async fn send_heartbeat_to_peer(peer: &str, serialized_heartbeat: &[u8]) -> bool {
     match tokio::net::TcpStream::connect(peer).await {
@@ -12,7 +13,7 @@ async fn send_heartbeat_to_peer(peer: &str, serialized_heartbeat: &[u8]) -> bool
             }
             tracing::debug!("Heartbeat sent to peer: {}. Waiting for response.", peer);
             return match commons::read_from_socket::<PeerResponse>(&mut stream).await {
-                Ok(PeerResponse::HeartbeatReceived) => {
+                Ok(PeerResponse::HeartbeatAcknoweledged) => {
                     tracing::debug!("Heartbeat accepted by peer: {}", peer);
                     true
                 }
@@ -50,8 +51,8 @@ pub async fn send_heartbeat(self_address: String, cluster_info: ClusterInfo) {
                 .filter(|&peer| peer != &self_address)
                 .cloned()
                 .collect();
-            let message_to_peer: CommandToPeer = CommandToPeer::Heartbeat {
-                peer_listener_address: self_address.clone(),
+            let message_to_peer = PeerCommand::Heartbeat {
+                peer_address: self_address.clone(),
                 broker_status: broker_info.clone(),
             };
             let serialized_heartbeat = commons::to_bytes(&message_to_peer);
@@ -59,8 +60,6 @@ pub async fn send_heartbeat(self_address: String, cluster_info: ClusterInfo) {
             for peer in &peers {
                 if send_heartbeat_to_peer(peer, &serialized_heartbeat).await {
                     successful_peers += 1;
-                } else {
-                    tracing::warn!("Failed to send heartbeat to peer: {}", peer);
                 }
             }
             if successful_peers == peers.len() {
@@ -87,9 +86,8 @@ pub async fn send_heartbeat(self_address: String, cluster_info: ClusterInfo) {
 
 #[cfg(test)]
 mod tests {
+    use commons::models::NodeInfo;
     use tracing_test::traced_test;
-
-    use crate::models::NodeInfo;
 
     use super::*;
 
@@ -119,23 +117,23 @@ mod tests {
         let mut remote_stream = remote_listener.accept().await.unwrap().0;
         tracing::debug!("Remote stream accepted from {}", remote_address);
 
-        match commons::read_from_socket::<CommandToPeer>(&mut remote_stream).await {
+        match commons::read_from_socket::<PeerCommand>(&mut remote_stream).await {
             Ok(command) => {
                 tracing::debug!("Received command from remote stream: {:?}", command);
                 match command {
-                    CommandToPeer::Heartbeat {
-                        peer_listener_address,
+                    PeerCommand::Heartbeat {
+                        peer_address,
                         broker_status,
                     } => {
-                        tracing::debug!("Received heartbeat from peer: {}", peer_listener_address);
-                        assert_eq!(peer_listener_address, self_address);
+                        tracing::debug!("Received heartbeat from peer: {}", peer_address);
+                        assert_eq!(peer_address, self_address);
                         assert_eq!(
                             broker_status.registed_topics,
                             vec!["test_topic".to_string()]
                         );
 
-                        let response = PeerResponse::HeartbeatReceived;
-                        let serialized_response = commons::to_bytes(&response);
+                        let serialized_response =
+                            commons::to_bytes(&PeerResponse::HeartbeatAcknoweledged);
                         remote_stream.write_all(&serialized_response).await.unwrap();
                         remote_stream.flush().await.unwrap();
                     }

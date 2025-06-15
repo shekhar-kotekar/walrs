@@ -1,6 +1,6 @@
 use commons::models::{
-    ConsumerCommand, ConsumerResponse, ProducerCommand, ProducerResponse, WalrsCommand,
-    WalrsResponse,
+    ConsumerCommand, ConsumerResponse, PeerCommand, PeerResponse, ProducerCommand,
+    ProducerResponse, WalrsCommand, WalrsResponse,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -91,6 +91,9 @@ impl MainListener {
                             WalrsCommand::Consumer(consumer_command) => {
                                 WalrsResponse::Consumer(handle_consumer_request(consumer_command, node_manager_tx).await)
                             }
+                            WalrsCommand::Peer(peer_command) => {
+                                WalrsResponse::Peer(handle_peer_request(peer_command, node_manager_tx).await)
+                            }
                         };
                         commons::write_to_socket::<WalrsResponse>(&response, &mut stream).await.unwrap_or_else(|err| {
                             tracing::error!("Failed to write response to socket: {}", err);
@@ -104,6 +107,47 @@ impl MainListener {
                 tracing::info!("Client request processing completed.");
             }
         }
+    }
+}
+
+async fn handle_peer_request(
+    command: PeerCommand,
+    node_manager_tx: mpsc::Sender<NodeManagerCommand>,
+) -> PeerResponse {
+    tracing::info!("Received peer command: {:?}", command);
+    match command {
+        PeerCommand::Heartbeat {
+            peer_address,
+            broker_status,
+        } => {
+            tracing::info!("Received heartbeat from peer: {}", peer_address);
+            let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeManagerResponse>();
+            let node_manager_command = NodeManagerCommand::Heartbeat {
+                peer_info: broker_status.clone(),
+                tx: oneshot_tx,
+            };
+
+            if let Err(err) = node_manager_tx.send(node_manager_command).await {
+                return PeerResponse::Error {
+                    message: format!("Failed to send heartbeat command to node manager: {}", err),
+                };
+            }
+
+            match oneshot_rx.await {
+                Ok(NodeManagerResponse::HeartbeatAcknowledged) => {
+                    PeerResponse::HeartbeatAcknoweledged
+                }
+                Ok(_) => PeerResponse::Error {
+                    message: String::from("Unexpected response from node manager"),
+                },
+                Err(err) => PeerResponse::Error {
+                    message: format!("Failed to receive response from node manager: {}", err),
+                },
+            }
+        }
+        _ => PeerResponse::Error {
+            message: String::from("Unsupported peer command"),
+        },
     }
 }
 

@@ -1,11 +1,11 @@
 use std::{collections::HashMap, io::ErrorKind};
 
-use commons::models::{PartitionInfo, Topic};
+use commons::models::{PartitionInfo, PartitionRole, PeerCommand, PeerResponse, Topic};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    models::{ClusterInfo, CommandToPeer, PartitionCommand, PartitionRole, PeerResponse},
+    models::{ClusterInfo, PartitionCommand},
     partition_managers::partition_writer::PartitionWriter,
 };
 
@@ -141,7 +141,7 @@ async fn create_remote_lead_partitions(
             .map(|(address, index)| (address.clone(), *index))
             .collect();
         followers.insert(self_address.to_owned(), 0); // add self as a follower with index 0
-        let command = CommandToPeer::CreatePartitionWriter {
+        let command = PeerCommand::CreatePartitionWriter {
             topic_name: topic_name.clone(),
             partition_number: *partition_number as u8,
             role: PartitionRole::Leader {
@@ -154,7 +154,7 @@ async fn create_remote_lead_partitions(
             topic_name,
             partition_number
         );
-        match commons::send_message::<CommandToPeer, PeerResponse>(
+        match commons::send_message::<PeerCommand, PeerResponse>(
             &command,
             partition_leader_peer_address,
         )
@@ -306,7 +306,7 @@ async fn create_partition_followers(
     self_address: &str,
 ) -> bool {
     for peer in peers {
-        let peer_command = CommandToPeer::CreatePartitionWriter {
+        let peer_command = PeerCommand::CreatePartitionWriter {
             topic_name: topic_name.clone(),
             partition_number,
             role: PartitionRole::Follower {
@@ -349,9 +349,8 @@ async fn create_partition_followers(
 
 #[cfg(test)]
 mod tests {
+    use commons::models::NodeInfo;
     use tracing_test::traced_test;
-
-    use crate::models::NodeInfo;
 
     use super::*;
 

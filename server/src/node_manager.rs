@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use commons::models::Topic;
+use commons::models::{NodeInfo, Topic};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -135,6 +135,13 @@ impl NodeManager {
                         NodeManagerCommand::GetPartitionReader { topic_name, tx } => {
                             self.handle_get_partition_reader(topic_name, tx, cancellation_token.child_token()).await;
                         }
+                        NodeManagerCommand::Heartbeat { peer_info, tx } => {
+                            tracing::info!("Received heartbeat from peer: {:?}", peer_info);
+                            self.cluster_info.add_node(peer_info);
+                            tx.send(NodeManagerResponse::HeartbeatAcknowledged).unwrap_or_else(|_| {
+                                tracing::warn!("Failed to send heartbeat acknowledgment.");
+                            });
+                        }
                     }
                 }
                 _ = cancellation_token.cancelled() => {
@@ -210,6 +217,10 @@ pub enum NodeManagerCommand {
         topic_name: String,
         tx: oneshot::Sender<NodeManagerResponse>,
     },
+    Heartbeat {
+        peer_info: NodeInfo,
+        tx: oneshot::Sender<NodeManagerResponse>,
+    },
 }
 
 #[derive(Debug)]
@@ -218,6 +229,7 @@ pub enum NodeManagerResponse {
         topic: Topic,
     },
     NotFound,
+    HeartbeatAcknowledged,
     PartitionWriter {
         writer: mpsc::Sender<PartitionCommand>,
     },

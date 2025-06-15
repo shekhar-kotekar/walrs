@@ -33,6 +33,7 @@ pub enum WalrsCommand {
     Admin(AdminCommand),
     Producer(ProducerCommand),
     Consumer(ConsumerCommand),
+    Peer(PeerCommand),
 }
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
@@ -40,6 +41,7 @@ pub enum WalrsResponse {
     Admin(AdminResponse),
     Producer(ProducerResponse),
     Consumer(ConsumerResponse),
+    Peer(PeerResponse),
 }
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
@@ -61,6 +63,47 @@ pub enum ProducerResponse {
     Error(String),
     RequestAccepted,
     MessagesPersisted { count: u8 },
+}
+
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub enum PartitionRole {
+    Leader { followers: HashMap<String, usize> },
+    Follower { leader_address: String },
+}
+
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub enum PeerCommand {
+    CreatePartitionWriter {
+        topic_name: String,
+        partition_number: u8,
+        role: PartitionRole,
+    },
+    Heartbeat {
+        peer_address: String,
+        broker_status: NodeInfo,
+    },
+}
+
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub enum PeerResponse {
+    PartitionWriterCreated,
+    HeartbeatAcknoweledged,
+    Error { message: String },
+}
+
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub struct NodeInfo {
+    pub registed_topics: Vec<String>,
+    pub address: String,
+}
+
+impl NodeInfo {
+    pub fn new(address: String) -> Self {
+        Self {
+            registed_topics: Vec::new(),
+            address,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Encode, Decode)]

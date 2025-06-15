@@ -1,11 +1,12 @@
 use std::env;
 
+use commons::models::NodeInfo;
 use tokio::sync::mpsc;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 use crate::{
     main_listener::MainListener,
-    models::{ClusterInfo, NodeConfig, NodeConfigBuilder, NodeInfo},
+    models::{ClusterInfo, NodeConfig, NodeConfigBuilder},
     node_manager::{NodeManager, NodeManagerCommand},
 };
 
