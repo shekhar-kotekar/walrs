@@ -1,3 +1,5 @@
+use std::thread::sleep;
+
 use commons::{
     admin::ClusterAdmin,
     models::{AckLevel, AdminCommand, AdminResponse, Topic},
@@ -37,7 +39,7 @@ async fn main() {
                 "Cluster admin command executed successfully: {:?}",
                 admin_command
             );
-
+            sleep(std::time::Duration::from_millis(500));
             let get_topic_info_command = AdminCommand::GetTopicInfo {
                 topic_name: topic.name.clone(),
             };

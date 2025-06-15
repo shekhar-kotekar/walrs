@@ -7,6 +7,7 @@ pub async fn handle_admin_request(
     command: AdminCommand,
     node_manager_tx: mpsc::Sender<NodeManagerCommand>,
 ) -> AdminResponse {
+    tracing::info!("command received: {:?}", command);
     match command {
         AdminCommand::CreateTopic { topic } => {
             node_manager_tx
@@ -21,7 +22,6 @@ pub async fn handle_admin_request(
             AdminResponse::RequestAccepted
         }
         AdminCommand::GetTopicInfo { topic_name } => {
-            tracing::info!("GetTopicInfo command received for topic: {}", topic_name);
             let (tx, rx) = oneshot::channel::<NodeManagerResponse>();
             let command = NodeManagerCommand::GetTopicInfo { topic_name, tx };
             node_manager_tx.send(command).await.unwrap_or_else(|err| {
@@ -31,15 +31,10 @@ pub async fn handle_admin_request(
                 );
             });
             match rx.await {
-                Ok(response) => {
-                    tracing::info!("Received topic info response: {:?}", response);
-                    match response {
-                        NodeManagerResponse::TopicInfo { topic } => {
-                            AdminResponse::TopicInfo { topic }
-                        }
-                        _ => AdminResponse::Error("Unexpected response type".into()),
-                    }
-                }
+                Ok(response) => match response {
+                    NodeManagerResponse::TopicInfo { topic } => AdminResponse::TopicInfo { topic },
+                    other => AdminResponse::Error(format!("Unexpected response type: {:?}", other)),
+                },
                 Err(err) => {
                     AdminResponse::Error(format!("Failed to receive topic info response: {}", err))
                 }

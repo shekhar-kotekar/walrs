@@ -61,7 +61,6 @@ impl NodeManager {
                 Some(response) = broker_to_topic_creator_rx.recv() => {
                     match response {
                         TopicManagerResponse::TopicCreated { topic, partition_zero_tx } => {
-                            tracing::info!("Topic created successfully: {:?}", topic);
                             let key_name = format!("{}-{}", topic.name, 0);
                             self.topic_metadata.insert(key_name.clone(), topic.clone());
                             self.local_partition_writers.insert(
@@ -77,37 +76,19 @@ impl NodeManager {
                 }
                 Some(command) = rx.recv() => {
                     match command {
-                        NodeManagerCommand::CreateTopic {mut topic} => {
-                            tracing::info!("Creating topic: {:?}", topic);
-                            let key_name = format!("{}-{}", topic.name, 0);
-                            if let Entry::Vacant(_) = self.topic_metadata.entry(key_name.clone()) {
-                                let topic_creator_cancellation_token = cancellation_token.child_token();
-                                let node_address_clone = self.node_config.address.clone();
-                                let local_data_dir_path = self.node_config.base_path_for_data.clone();
-                                let cluster_info = self.cluster_info.clone();
-
-                                let broker_to_topic_creator_tx_clone = broker_to_topic_creator_tx.clone();
-                                let topic_clone = topic.clone();
-                                tokio::spawn(async move {
-                                    create_topic::create_topic(
-                                        topic_clone,
-                                        node_address_clone,
-                                        local_data_dir_path,
-                                        cluster_info,
-                                        broker_to_topic_creator_tx_clone,
-                                        topic_creator_cancellation_token,
-                                    )
-                                    .await;
-                                });
-                                topic.status = TopicStatus::CreationInProgress;
-                                self.topic_metadata.insert(key_name, topic);
-                            } else {
-                                tracing::warn!("Topic {} already exists.", key_name);
-                            }
+                        NodeManagerCommand::CreateTopic { topic} => {
+                            self.handle_create_topic(
+                                topic,
+                                cancellation_token.child_token(),
+                                broker_to_topic_creator_tx.clone(),
+                            ).await;
                         }
                         NodeManagerCommand::GetTopicInfo { topic_name, tx } => {
-                            if let Some(topic) = self.topic_metadata.get(&topic_name) {
-                                tx.send(NodeManagerResponse::TopicInfo { topic: topic.clone() }).unwrap_or_else(|_| {
+                            let topic_info: Option<Topic> = self.topic_metadata.iter()
+                                .find(|(key, _)| key.starts_with(&topic_name))
+                                .map(|(_, topic)| topic.clone());
+                            if let Some(topic) = topic_info {
+                                tx.send(NodeManagerResponse::TopicInfo { topic }).unwrap_or_else(|_| {
                                     tracing::warn!("Failed to send topic info response.");
                                 });
                             } else {
@@ -156,6 +137,49 @@ impl NodeManager {
             }
         }
         tracing::info!("Node manager stopped.");
+    }
+
+    async fn handle_create_topic(
+        &mut self,
+        mut topic: Topic,
+        cancellation_token: CancellationToken,
+        broker_to_topic_creator_tx: mpsc::Sender<TopicManagerResponse>,
+    ) {
+        let key_name = format!("{}-{}", topic.name, 0);
+        if let Entry::Vacant(_) = self.topic_metadata.entry(key_name.clone()) {
+            let topic_creator_cancellation_token = cancellation_token.child_token();
+            let node_address_clone = self.node_config.address.clone();
+            let local_data_dir_path = self.node_config.base_path_for_data.clone();
+            let cluster_info = self.cluster_info.clone();
+
+            let topic_clone = topic.clone();
+            tokio::spawn(async move {
+                create_topic::create_topic(
+                    topic_clone,
+                    node_address_clone,
+                    local_data_dir_path,
+                    cluster_info,
+                    broker_to_topic_creator_tx,
+                    topic_creator_cancellation_token,
+                )
+                .await;
+            });
+            topic.status = TopicStatus::CreationInProgress;
+            self.topic_metadata.insert(key_name, topic.clone());
+            let mut self_node_info: NodeInfo = self
+                .cluster_info
+                .nodes
+                .iter()
+                .find(|(node_address, _)| **node_address == self.node_config.address)
+                .map(|(_, node_info)| node_info.clone())
+                .unwrap();
+            self_node_info.registed_topics.push(topic.name.clone());
+            self.cluster_info
+                .nodes
+                .insert(self.node_config.address.clone(), self_node_info);
+        } else {
+            tracing::warn!("Topic {} already exists.", key_name);
+        }
     }
 
     async fn handle_get_partition_writer(
