@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use commons::models::{NodeInfo, Topic, TopicStatus};
+use commons::models::{NodeInfo, PartitionRole, Topic, TopicStatus};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -10,7 +10,7 @@ use crate::{
         heartbeat,
     },
     models::{ClusterInfo, NodeConfig, PartitionCommand},
-    partition_managers::partition_reader::PartitionReader,
+    partition_managers::{partition_reader::PartitionReader, partition_writer::PartitionWriter},
 };
 
 // this is broker struct in old code.
@@ -115,6 +115,20 @@ impl NodeManager {
                                 });
                             }
                         }
+                        NodeManagerCommand::CreatePartitionWriter {
+                            topic_name,
+                            partition_number,
+                            role,
+                            tx,
+                        } => {
+                            self.handle_create_partition_writer(
+                                topic_name,
+                                partition_number,
+                                role,
+                                tx,
+                                cancellation_token.child_token(),
+                            ).await;
+                        }
                         NodeManagerCommand::GetPartitionWriter { topic_name, tx } => {
                             tracing::info!("Getting partition writer for topic: {}", topic_name);
                             let response = if let Some(writer) = self.local_partition_writers.get(&topic_name) {
@@ -152,6 +166,48 @@ impl NodeManager {
             }
         }
         tracing::info!("Node manager stopped.");
+    }
+
+    async fn handle_create_partition_writer(
+        &mut self,
+        topic_name: String,
+        partition_number: u8,
+        role: PartitionRole,
+        tx: oneshot::Sender<NodeManagerResponse>,
+        cancellation_token: CancellationToken,
+    ) {
+        tracing::info!(
+            "Creating partition writer for topic: {}, partition: {}, role: {:?}",
+            topic_name,
+            partition_number,
+            role
+        );
+
+        let response: NodeManagerResponse =
+            if self.local_partition_writers.contains_key(&topic_name) {
+                NodeManagerResponse::PartitionWriterAlreadyExists
+            } else {
+                let (partition_writer_tx, partition_writer_rx) =
+                    mpsc::channel::<PartitionCommand>(10);
+
+                let mut partition_writer = PartitionWriter::new(
+                    &topic_name,
+                    partition_number,
+                    &self.node_config.base_path_for_data,
+                );
+                tokio::spawn(async move {
+                    partition_writer
+                        .start(partition_writer_rx, cancellation_token)
+                        .await;
+                });
+
+                self.local_partition_writers
+                    .insert(topic_name.clone(), partition_writer_tx.clone());
+                NodeManagerResponse::PartitionWriterCreated
+            };
+        tx.send(response).unwrap_or_else(|_| {
+            tracing::error!("Failed to send partition writer response.");
+        });
     }
 
     async fn handle_get_partition_reader(
@@ -200,6 +256,12 @@ pub enum NodeManagerCommand {
     CreateTopic {
         topic: Topic,
     },
+    CreatePartitionWriter {
+        topic_name: String,
+        partition_number: u8,
+        role: PartitionRole,
+        tx: oneshot::Sender<NodeManagerResponse>,
+    },
     GetTopicInfo {
         topic_name: String,
         tx: oneshot::Sender<NodeManagerResponse>,
@@ -225,6 +287,8 @@ pub enum NodeManagerResponse {
     },
     NotFound,
     HeartbeatAcknowledged,
+    PartitionWriterCreated,
+    PartitionWriterAlreadyExists,
     PartitionWriter {
         writer: mpsc::Sender<PartitionCommand>,
     },

@@ -140,9 +140,40 @@ async fn handle_peer_request(
                 },
             }
         }
-        _ => PeerResponse::Error {
-            message: String::from("Unsupported peer command"),
-        },
+        PeerCommand::CreatePartitionWriter {
+            topic_name,
+            partition_number,
+            role,
+        } => {
+            let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeManagerResponse>();
+            let node_manager_command = NodeManagerCommand::CreatePartitionWriter {
+                topic_name,
+                partition_number,
+                role,
+                tx: oneshot_tx,
+            };
+
+            if let Err(err) = node_manager_tx.send(node_manager_command).await {
+                return PeerResponse::Error {
+                    message: format!(
+                        "Failed to send create partition writer command to node manager: {}",
+                        err
+                    ),
+                };
+            }
+
+            match oneshot_rx.await {
+                Ok(NodeManagerResponse::PartitionWriterCreated) => {
+                    PeerResponse::PartitionWriterCreated
+                }
+                Ok(_) => PeerResponse::Error {
+                    message: String::from("Unexpected response from node manager"),
+                },
+                Err(err) => PeerResponse::Error {
+                    message: format!("Failed to receive response from node manager: {}", err),
+                },
+            }
+        }
     }
 }
 
