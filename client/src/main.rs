@@ -1,139 +1,128 @@
-use common::{
+use std::{collections::HashMap, thread::sleep};
+
+use commons::{
     admin::ClusterAdmin,
     consumer::Consumer,
-    models::{AckLevel, ClientCommand, ClusterResponse, Message, Topic},
+    models::{AckLevel, AdminCommand, AdminResponse, Message, ProducerResponse, Topic},
     producer::Producer,
 };
 
 #[tokio::main]
 async fn main() {
-    common::init_tracing(None);
-    let admin = ClusterAdmin {
-        brokers: vec!["127.0.0.1:5056".into(), "127.0.0.1:5058".into()],
-    };
-    let topic_name: &str = "my_new_topic";
+    commons::init_tracing(None);
 
-    let replication_factor: u8 = 2;
-    let topic_to_create = Topic::new(
-        topic_name.to_string(),
-        Some(2), // number of partitions
-        Some(replication_factor),
-        Some(10),               // retention time in minutes
-        Some(AckLevel::Leader), // ack level
+    let topic: Topic = Topic::new(
+        "client_topic_1".into(),
+        None,
+        None,
+        Some(60),
+        Some(AckLevel::Leader),
     )
     .unwrap();
-    let command = ClientCommand::CreateTopic {
-        topic_details: topic_to_create,
-    };
-    let first_message = Message {
-        key: Some("key1".to_string()),
-        payload: "first_message".as_bytes().to_vec(),
-    };
-    let second_message = Message {
-        key: None,
-        payload: "second_message".as_bytes().to_vec(),
-    };
-    let sent_messages = vec![first_message, second_message];
-    match admin.create_topic(command) {
-        ClusterResponse::TopicCreated { topic_metadata } => {
-            tracing::info!("Topic created successfully. Metadata: {:?}", topic_metadata);
-            send_messages(topic_name, sent_messages.clone());
 
-            let received_messages = read_messages(topic_name, admin.brokers.clone()).await;
-            tracing::debug!("received messages");
-            for message in &received_messages {
-                tracing::debug!("  {:?}", message);
-            }
-        }
-        ClusterResponse::RequestInProgress => {
-            tracing::info!("Request is in progress");
-            // keep sending status requests until the topic is created
-            let mut attempts = 0;
-            loop {
-                tracing::info!("Checking request status. Attempt: {}", attempts);
-                if attempts >= 10 {
-                    tracing::error!("Request timed out after 10 attempts.");
-                    break;
+    let admin_command = AdminCommand::CreateTopic {
+        topic: topic.clone(),
+    };
+
+    let brokers = vec![
+        String::from("127.0.0.1:5075"),
+        String::from("127.0.0.1:5076"),
+        String::from("127.0.0.1:5077"),
+    ];
+
+    let cluster_admin = ClusterAdmin {
+        brokers: brokers.clone(),
+    };
+
+    let response = cluster_admin
+        .send_command_and_get_response(&admin_command)
+        .await;
+    match response {
+        AdminResponse::RequestAccepted => {
+            tracing::info!(
+                "Cluster admin command executed successfully: {:?}",
+                admin_command
+            );
+            sleep(std::time::Duration::from_millis(500));
+            let get_topic_info_command = AdminCommand::GetTopicInfo {
+                topic_names: vec![topic.name.clone()],
+            };
+
+            match cluster_admin
+                .send_command_and_get_response(&get_topic_info_command)
+                .await
+            {
+                AdminResponse::TopicInfo { topics } => {
+                    tracing::info!("Topic info retrieved successfully: {:?}", topics);
+                    send_messages(brokers.clone(), &topic.name).await;
+                    read_messages(brokers, &topic.name).await;
                 }
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                let status_response = admin.get_request_status(topic_name.to_string());
-                match status_response {
-                    ClusterResponse::TopicCreated { topic_metadata } => {
-                        tracing::info!(
-                            "Topic created successfully. Metadata: {:?}",
-                            topic_metadata
-                        );
-                        send_messages(topic_name, sent_messages.clone());
-
-                        let received_messages =
-                            read_messages(topic_name, admin.brokers.clone()).await;
-                        tracing::debug!("received messages");
-                        for message in &received_messages {
-                            tracing::debug!("  {:?}", message);
-                        }
-                        break;
-                    }
-                    ClusterResponse::RequestInProgress => {
-                        attempts += 1;
-                        tracing::info!("Request still in progress. Attempt: {}", attempts);
-                    }
-                    e => {
-                        tracing::error!("Unexpected response: {:?}", e);
-                        attempts += 1;
-                    }
+                AdminResponse::Error(err) => tracing::error!(err),
+                _ => {
+                    tracing::error!("Unexpected response type: {:?}", response);
                 }
             }
         }
-        ClusterResponse::TopicAlreadyExists => {
-            tracing::info!("{} topic already exists.", topic_name);
-            send_messages(topic_name, sent_messages.clone());
-
-            let received_messages = read_messages(topic_name, admin.brokers.clone()).await;
-            tracing::debug!("received messages");
-            for message in &received_messages {
-                tracing::debug!("  {:?}", message);
-            }
+        AdminResponse::Error(err) => {
+            tracing::error!(err);
         }
-        e => {
-            tracing::error!("Failed to create topic because: {:?}", e);
+        _ => {
+            tracing::error!("Unexpected response type: {:?}", response);
         }
-    };
-    // check if sent messages and received messages are same
-    tracing::debug!("sent messages");
-    for message in &sent_messages {
-        tracing::debug!("  {:?}", message);
     }
+    tracing::info!("Cluster admin command executed successfully.");
 }
 
-fn send_messages(topic_name: &str, messages: Vec<Message>) {
-    let mut producer = Producer::new(vec!["127.0.0.1:5056".into()]);
-    for message in messages {
-        producer.send(topic_name.to_owned(), &message);
-    }
-    let cluster_response: ClusterResponse = producer.flush();
-    match cluster_response {
-        ClusterResponse::MessagesPersisted { count } => {
-            tracing::info!("{} Messages successfully persisted.", count);
+async fn read_messages(brokers: Vec<String>, topic: &str) {
+    let consumer = Consumer::new(brokers.clone());
+    match consumer.fetch_messages(topic).await {
+        Ok(messages) => {
+            tracing::info!("Fetched messages: {:?}", messages);
         }
-        e => {
-            tracing::error!("Failed to persist messages because: {:?}", e);
+        Err(e) => {
+            tracing::error!("Failed to fetch messages: {}", e);
         }
     }
 }
 
-async fn read_messages(topic_name: &str, brokers: Vec<String>) -> Vec<Message> {
-    let mut consumer = Consumer::new(topic_name.to_owned(), brokers);
-    match consumer.next_message().await {
-        Some(message_batch) => {
-            tracing::info!("Received message count: {:?}", message_batch.messages.len());
-            message_batch.messages.iter().for_each(|m| {
-                tracing::info!("Received message: {:?}", m);
-            });
-            message_batch.messages
-        }
-        None => {
-            tracing::error!("Failed to receive message batch.");
-            Vec::new()
+async fn send_messages(brokers: Vec<String>, topic: &str) {
+    let mut producer: Producer = Producer::new(brokers.clone());
+    let messages = vec![
+        Message {
+            key: Some("key1".to_string()),
+            payload: "this is first message".as_bytes().to_vec(),
+            headers: HashMap::from([("first_msg_header".to_string(), "value1".to_string())]),
+        },
+        Message {
+            key: Some("key2".to_string()),
+            payload: "this is second message".as_bytes().to_vec(),
+            headers: HashMap::from([("name".to_string(), "Shekhar".to_string())]),
+        },
+        Message {
+            key: None,
+            payload: "this is third message".as_bytes().to_vec(),
+            headers: HashMap::from([
+                ("name".to_string(), "foo bar".to_string()),
+                ("age".to_string(), "23".to_string()),
+            ]),
+        },
+    ];
+
+    producer.send_batch(topic.to_owned(), messages);
+    match producer.flush().await {
+        Ok(response) => match response {
+            ProducerResponse::MessagesPersisted { count } => {
+                tracing::info!("Messages persisted successfully: {}", count)
+            }
+            ProducerResponse::Error { message } => {
+                tracing::error!("Failed to persist messages: {}", message);
+            }
+            _ => {
+                tracing::error!("Unexpected response type: {:?}", response);
+            }
+        },
+        Err(e) => {
+            tracing::error!("Failed to send messages: {}", e);
         }
     }
 }

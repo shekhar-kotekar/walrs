@@ -81,4 +81,5 @@ teardown: set_kind_context
 	kubectl get namespaces
 
 dev-setup:
+	@bash ./scripts/dev-setup.sh
 	@cargo install --locked tokio-console
