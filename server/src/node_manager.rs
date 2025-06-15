@@ -1,52 +1,49 @@
 use std::collections::HashMap;
 
 use commons::models::Topic;
-use tokio::{
-    sync::{mpsc, oneshot},
-    time,
-};
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
     handlers::create_topic::{self, TopicManagerResponse},
-    models::{ClusterInfo, PartitionCommand},
+    models::{ClusterInfo, NodeConfig, PartitionCommand},
     partition_managers::partition_reader::PartitionReader,
 };
 
 // this is broker struct in old code.
 pub struct NodeManager {
-    node_address: String,
-    data_dir_path: String,
-    heartbeat_interval: tokio::time::Interval,
+    node_config: NodeConfig,
     cluster_info: ClusterInfo,
+    heartbeat_interval: tokio::time::Interval,
     local_partition_writers: HashMap<String, mpsc::Sender<PartitionCommand>>,
     local_partition_readers: HashMap<String, mpsc::Sender<PartitionCommand>>,
     topic_metadata: HashMap<String, Topic>,
 }
 
 impl NodeManager {
-    pub fn new(
-        node_address: String,
-        data_dir_path: String,
-        heartbeat_interval_ms: u16,
-        cluster_info: ClusterInfo,
-    ) -> Self {
+    pub fn new(node_config: NodeConfig, cluster_info: ClusterInfo) -> Self {
+        let data_dir_path = format!(
+            "{}/{}",
+            node_config.base_path_for_data,
+            node_config.ip.replace(".", "_")
+        );
         std::fs::create_dir_all(&data_dir_path).unwrap_or_else(|e| {
             panic!(
                 "Failed to create base directory: {} because: {}",
                 &data_dir_path, e
             );
         });
-        let heartbeat_interval =
-            time::interval(time::Duration::from_millis(heartbeat_interval_ms.into()));
+        let heartbeat_interval = tokio::time::interval(std::time::Duration::from_millis(
+            node_config.heartbeat_interval_ms.into(),
+        ));
+
         Self {
-            data_dir_path,
-            heartbeat_interval,
+            node_config,
             cluster_info,
+            heartbeat_interval,
             local_partition_writers: HashMap::new(),
             local_partition_readers: HashMap::new(),
             topic_metadata: HashMap::new(),
-            node_address,
         }
     }
 }
@@ -88,8 +85,8 @@ impl NodeManager {
                                 tracing::warn!("Topic {} already exists.", topic.name);
                             } else {
                                 let topic_creator_cancellation_token = cancellation_token.child_token();
-                                let node_address_clone = self.node_address.clone();
-                                let local_data_dir_path = self.data_dir_path.clone();
+                                let node_address_clone = self.node_config.ip.clone();
+                                let local_data_dir_path = self.node_config.base_path_for_data.clone();
                                 let cluster_info = self.cluster_info.clone();
 
                                 let broker_to_topic_creator_tx_clone = broker_to_topic_creator_tx.clone();
@@ -169,10 +166,13 @@ impl NodeManager {
             let mut partition_reader: PartitionReader = PartitionReader::new(
                 topic_name.clone(),
                 partition_number,
-                self.data_dir_path.clone(),
+                self.node_config.base_path_for_data.clone(),
                 message_batch_size,
             );
-            let (partition_reader_tx, partition_reader_rx) = mpsc::channel::<PartitionCommand>(10);
+
+            let (partition_reader_tx, partition_reader_rx) =
+                mpsc::channel::<PartitionCommand>(self.node_config.mpsc_queue_size);
+
             tokio::spawn(async move {
                 partition_reader
                     .start(partition_reader_rx, cancellation_token)
