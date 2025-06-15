@@ -46,23 +46,12 @@ pub fn to_bytes<T: Encode + Debug>(value: &T) -> Vec<u8> {
 }
 
 pub fn from_bytes<T: Decode<()>>(bytes: &[u8]) -> Result<T, DecodeError> {
-    // tracing::debug!(
-    //     "deserializing {} bytes to type: {}",
-    //     bytes.len(),
-    //     std::any::type_name::<T>()
-    // );
     bincode::decode_from_slice(bytes, bincode::config::standard()).map(|(value, _)| value)
 }
 
 pub async fn read_from_socket<T: Decode<()>>(socket: &mut TcpStream) -> Result<T, std::io::Error> {
     let mut buffer = BytesMut::with_capacity(512);
     let num_bytes_read = socket.read_buf(&mut buffer).await?;
-    // tracing::debug!(
-    //     "Buffer length: {}, number of bytes read from socket: {}",
-    //     buffer.len(),
-    //     num_bytes_read,
-    // );
-
     if num_bytes_read == 0 {
         Err(std::io::Error::new(
             std::io::ErrorKind::UnexpectedEof,
@@ -84,7 +73,6 @@ pub async fn send_message<T: Encode + Debug, ResponseType: Decode<()>>(
 ) -> Result<ResponseType, std::io::Error> {
     match TcpStream::connect(peer_address).await {
         Ok(mut stream) => {
-            tracing::debug!("Connected to peer at {}", peer_address);
             write_to_socket(data, &mut stream).await?;
             read_from_socket::<ResponseType>(&mut stream).await
         }
@@ -103,8 +91,8 @@ pub async fn send_and_receive_peer_command(
     match send_message::<WalrsCommand, WalrsResponse>(&walrs_command, peer_address).await {
         Ok(response) => match response {
             WalrsResponse::Peer(peer_response) => peer_response,
-            _ => PeerResponse::Error {
-                message: "Unexpected response type".to_string(),
+            response => PeerResponse::Error {
+                message: format!("Unexpected response type: {:?}", response),
             },
         },
         Err(e) => PeerResponse::Error {
@@ -119,17 +107,7 @@ pub async fn send_serialized_message<ResponseType: Decode<()>>(
 ) -> Result<ResponseType, std::io::Error> {
     match TcpStream::connect(peer_address).await {
         Ok(mut stream) => {
-            tracing::debug!(
-                "Connected. peer address: {}, local address: {}",
-                peer_address,
-                stream.local_addr().unwrap()
-            );
             stream.write_all(serialized_data).await.unwrap();
-            tracing::debug!(
-                "Sent serialized data of length {} to: {}",
-                serialized_data.len(),
-                peer_address
-            );
             read_from_socket::<ResponseType>(&mut stream).await
         }
         Err(e) => {

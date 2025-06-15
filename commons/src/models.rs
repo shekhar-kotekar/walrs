@@ -86,7 +86,7 @@ pub enum PeerCommand {
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
 pub enum PeerResponse {
     PartitionWriterCreated,
-    HeartbeatAcknoweledged,
+    HeartbeatAcknowledged,
     Error { message: String },
 }
 

@@ -26,7 +26,7 @@ pub async fn send_heartbeat(self_address: String, cluster_info: ClusterInfo) {
                 match commons::send_serialized_message::<WalrsResponse>(&serialized_heartbeat, peer)
                     .await
                 {
-                    Ok(WalrsResponse::Peer(PeerResponse::HeartbeatAcknoweledged)) => {
+                    Ok(WalrsResponse::Peer(PeerResponse::HeartbeatAcknowledged)) => {
                         tracing::debug!("Heartbeat acknowledged by peer: {}", peer);
                         successful_peers += 1;
                     }
@@ -111,7 +111,7 @@ mod tests {
                         assert_eq!(node_info.registed_topics, vec!["test_topic".to_string()]);
 
                         let serialized_response =
-                            commons::to_bytes(&PeerResponse::HeartbeatAcknoweledged);
+                            commons::to_bytes(&PeerResponse::HeartbeatAcknowledged);
                         remote_stream.write_all(&serialized_response).await.unwrap();
                         remote_stream.flush().await.unwrap();
                     }

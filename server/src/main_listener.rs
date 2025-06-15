@@ -95,6 +95,7 @@ impl MainListener {
                                 WalrsResponse::Peer(handle_peer_request(peer_command, node_manager_tx).await)
                             }
                         };
+                        tracing::info!("Sending response: {:?}", response);
                         commons::write_to_socket::<WalrsResponse>(&response, &mut stream).await.unwrap_or_else(|err| {
                             tracing::error!("Failed to write response to socket: {}", err);
                         });
@@ -130,10 +131,10 @@ async fn handle_peer_request(
 
             match oneshot_rx.await {
                 Ok(NodeManagerResponse::HeartbeatAcknowledged) => {
-                    PeerResponse::HeartbeatAcknoweledged
+                    PeerResponse::HeartbeatAcknowledged
                 }
-                Ok(_) => PeerResponse::Error {
-                    message: String::from("Unexpected response from node manager"),
+                Ok(other) => PeerResponse::Error {
+                    message: format!("Unexpected response from node manager: {:?}", other),
                 },
                 Err(err) => PeerResponse::Error {
                     message: format!("Failed to receive response from node manager: {}", err),
@@ -166,8 +167,9 @@ async fn handle_peer_request(
                 Ok(NodeManagerResponse::PartitionWriterCreated) => {
                     PeerResponse::PartitionWriterCreated
                 }
-                Ok(_) => PeerResponse::Error {
-                    message: String::from("Unexpected response from node manager"),
+                Ok(NodeManagerResponse::Error { message }) => PeerResponse::Error { message },
+                Ok(other) => PeerResponse::Error {
+                    message: format!("Unexpected response from node manager: {:?}", other),
                 },
                 Err(err) => PeerResponse::Error {
                     message: format!("Failed to receive response from node manager: {}", err),
