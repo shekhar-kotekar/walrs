@@ -92,12 +92,18 @@ impl NodeConfigBuilder {
     }
 
     pub fn build(self) -> NodeConfig {
+        let ip_address = self.ip.unwrap_or("0.0.0.0".to_string());
+        let data_dir_path = format!(
+            "{}/{}",
+            self.base_path_for_data,
+            ip_address.replace(".", "_")
+        );
         NodeConfig {
-            ip: self.ip.unwrap_or("0.0.0.0".to_string()),
+            ip: ip_address,
             port: self.port,
             heartbeat_interval_ms: self.heartbeat_interval_ms,
             mpsc_queue_size: self.mpsc_max_queue_size,
-            base_path_for_data: self.base_path_for_data,
+            base_path_for_data: data_dir_path,
             peers: self.peers,
         }
     }

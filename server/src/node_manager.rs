@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use commons::models::{NodeInfo, Topic};
+use commons::models::{NodeInfo, Topic, TopicStatus};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -25,15 +25,10 @@ pub struct NodeManager {
 
 impl NodeManager {
     pub fn new(node_config: NodeConfig, cluster_info: ClusterInfo) -> Self {
-        let data_dir_path = format!(
-            "{}/{}",
-            node_config.base_path_for_data,
-            node_config.ip.replace(".", "_")
-        );
-        std::fs::create_dir_all(&data_dir_path).unwrap_or_else(|e| {
+        std::fs::create_dir_all(&node_config.base_path_for_data).unwrap_or_else(|e| {
             panic!(
                 "Failed to create base directory: {} because: {}",
-                &data_dir_path, e
+                &node_config.base_path_for_data, e
             );
         });
         let heartbeat_interval = tokio::time::interval(std::time::Duration::from_millis(
@@ -81,7 +76,7 @@ impl NodeManager {
                 }
                 Some(command) = rx.recv() => {
                     match command {
-                        NodeManagerCommand::CreateTopic {topic} => {
+                        NodeManagerCommand::CreateTopic {mut topic} => {
                             tracing::info!("Creating topic: {:?}", topic);
                             if self.topic_metadata.contains_key(&topic.name) {
                                 tracing::warn!("Topic {} already exists.", topic.name);
@@ -92,9 +87,10 @@ impl NodeManager {
                                 let cluster_info = self.cluster_info.clone();
 
                                 let broker_to_topic_creator_tx_clone = broker_to_topic_creator_tx.clone();
+                                let topic_clone = topic.clone();
                                 tokio::spawn(async move {
                                     create_topic::create_topic(
-                                        topic,
+                                        topic_clone,
                                         node_address_clone,
                                         local_data_dir_path,
                                         cluster_info,
@@ -103,6 +99,8 @@ impl NodeManager {
                                     )
                                     .await;
                                 });
+                                topic.status = TopicStatus::CreationInProgress;
+                                self.topic_metadata.insert(topic.name.clone(), topic);
                             }
                         }
                         NodeManagerCommand::GetTopicInfo { topic_name, tx } => {

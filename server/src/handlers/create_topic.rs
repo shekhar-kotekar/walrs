@@ -1,6 +1,8 @@
 use std::{collections::HashMap, io::ErrorKind};
 
-use commons::models::{PartitionInfo, PartitionRole, PeerCommand, PeerResponse, Topic};
+use commons::models::{
+    PartitionInfo, PartitionRole, PeerCommand, PeerResponse, Topic, TopicStatus,
+};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -81,14 +83,8 @@ pub async fn create_topic(
                     match create_remote_lead_partitions(&topic_clone.name, &self_address, potential_peers_for_topic).await {
                         Ok(remote_partitions) => {
                             partitions.extend(remote_partitions);
-                            // let topic_metadata = TopicMetadata {
-                            //     name: topic_clone.name.clone(),
-                            //     replication_factor: topic_clone.replication_factor,
-                            //     retention_period_minutes: topic_clone.retention_period_minutes,
-                            //     ack_level: topic_clone.ack_level.clone(),
-                            //     partitions,
-                            // };
                             topic_clone.add_partitions(partitions);
+                            topic_clone.status = TopicStatus::ReadyToServe;
                             tracing::debug!(
                                 "Topic created successfully: {:?}",
                                 topic_clone.name
@@ -154,13 +150,8 @@ async fn create_remote_lead_partitions(
             topic_name,
             partition_number
         );
-        match commons::send_message::<PeerCommand, PeerResponse>(
-            &command,
-            partition_leader_peer_address,
-        )
-        .await
-        {
-            Ok(PeerResponse::PartitionWriterCreated) => {
+        match commons::send_and_receive_peer_command(command, partition_leader_peer_address).await {
+            PeerResponse::PartitionWriterCreated => {
                 tracing::info!(
                     "Peer {} successfully created lead partition. Topic: {}, partition: {}",
                     partition_leader_peer_address,
@@ -174,7 +165,7 @@ async fn create_remote_lead_partitions(
                 };
                 partition_infos.push(partition_info);
             }
-            Ok(other_response) => {
+            other_response => {
                 tracing::error!(
                     "Peer {} responded with unexpected response: {:?}. topic: {}, partition: {}",
                     partition_leader_peer_address,
@@ -187,22 +178,6 @@ async fn create_remote_lead_partitions(
                     format!(
                         "Unexpected response from peer {}. topic: {}, partition: {}",
                         partition_leader_peer_address, topic_name, partition_number
-                    ),
-                ));
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Failed to request peer {} to create lead partition. topic: {}, partition: {}. Error: {}",
-                    partition_leader_peer_address,
-                    topic_name,
-                    partition_number,
-                    e
-                );
-                return Err(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!(
-                        "Failed to create remote lead partition on peer {}. topic: {}, partition: {}. Error: {}",
-                        partition_leader_peer_address, topic_name, partition_number, e
                     ),
                 ));
             }
@@ -313,8 +288,8 @@ async fn create_partition_followers(
                 leader_address: self_address.to_string(),
             },
         };
-        match commons::send_message(&peer_command, &peer).await {
-            Ok(PeerResponse::PartitionWriterCreated) => {
+        match commons::send_and_receive_peer_command(peer_command, &peer).await {
+            PeerResponse::PartitionWriterCreated => {
                 tracing::info!(
                     "Peer {} created follower partition for topic: {}, partition: {}",
                     peer,
@@ -322,23 +297,13 @@ async fn create_partition_followers(
                     partition_number
                 );
             }
-            Ok(other_response) => {
+            other_response => {
                 tracing::error!(
                     "Peer {} responded with unexpected response: {:?} for topic: {}, partition: {}",
                     peer,
                     other_response,
                     topic_name,
                     partition_number
-                );
-                return false;
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Failed to request peer {} to create follower partition for topic: {}, partition: {}. Error: {}",
-                    peer,
-                    topic_name,
-                    partition_number,
-                    e
                 );
                 return false;
             }

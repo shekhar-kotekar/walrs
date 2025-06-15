@@ -10,6 +10,8 @@ use tokio::{
 };
 use tracing_subscriber::fmt::format::FmtSpan;
 
+use crate::models::{PeerCommand, PeerResponse, WalrsCommand, WalrsResponse};
+
 pub mod admin;
 pub mod models;
 
@@ -44,22 +46,22 @@ pub fn to_bytes<T: Encode + Debug>(value: &T) -> Vec<u8> {
 }
 
 pub fn from_bytes<T: Decode<()>>(bytes: &[u8]) -> Result<T, DecodeError> {
-    tracing::debug!(
-        "deserializing {} bytes to type: {}",
-        bytes.len(),
-        std::any::type_name::<T>()
-    );
+    // tracing::debug!(
+    //     "deserializing {} bytes to type: {}",
+    //     bytes.len(),
+    //     std::any::type_name::<T>()
+    // );
     bincode::decode_from_slice(bytes, bincode::config::standard()).map(|(value, _)| value)
 }
 
 pub async fn read_from_socket<T: Decode<()>>(socket: &mut TcpStream) -> Result<T, std::io::Error> {
     let mut buffer = BytesMut::with_capacity(512);
     let num_bytes_read = socket.read_buf(&mut buffer).await?;
-    tracing::debug!(
-        "Buffer length: {}, number of bytes read from socket: {}",
-        buffer.len(),
-        num_bytes_read,
-    );
+    // tracing::debug!(
+    //     "Buffer length: {}, number of bytes read from socket: {}",
+    //     buffer.len(),
+    //     num_bytes_read,
+    // );
 
     if num_bytes_read == 0 {
         Err(std::io::Error::new(
@@ -90,6 +92,24 @@ pub async fn send_message<T: Encode + Debug, ResponseType: Decode<()>>(
             tracing::error!("Failed to connect to peer at {}: {}", peer_address, e);
             Err(e)
         }
+    }
+}
+
+pub async fn send_and_receive_peer_command(
+    command: PeerCommand,
+    peer_address: &String,
+) -> PeerResponse {
+    let walrs_command = WalrsCommand::Peer(command);
+    match send_message::<WalrsCommand, WalrsResponse>(&walrs_command, peer_address).await {
+        Ok(response) => match response {
+            WalrsResponse::Peer(peer_response) => peer_response,
+            _ => PeerResponse::Error {
+                message: "Unexpected response type".to_string(),
+            },
+        },
+        Err(e) => PeerResponse::Error {
+            message: format!("Failed to send command: {}", e),
+        },
     }
 }
 

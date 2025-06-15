@@ -104,7 +104,7 @@ impl MainListener {
                     }
                 }
             } => {
-                tracing::info!("Client request processing completed.");
+                tracing::debug!("Client request processing completed.");
             }
         }
     }
