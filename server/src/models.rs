@@ -50,7 +50,7 @@ pub enum PartitionCommand {
     },
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 pub struct NodeConfig {
     pub address: String,
     pub peers: Vec<String>,

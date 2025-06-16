@@ -193,7 +193,7 @@ pub async fn create_partition(
     cancellation_token: CancellationToken,
 ) -> Option<mpsc::Sender<PartitionCommand>> {
     tracing::info!(
-        "Creating partition {} for topic: {}, role: {:?}",
+        "Creating partition {}, topic: {}, role: {:?}",
         partition_number,
         topic_name,
         partition_role
@@ -279,4 +279,72 @@ async fn create_partition_followers(
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use tokio::sync::oneshot;
+
+    use super::*;
+
+    #[tokio::test]
+    #[ignore]
+    #[tracing_test::traced_test]
+    async fn test_lead_partition_should_forward_messages_to_followers_when_topic_ack_level_is_majority()
+     {
+        let topic_name = String::from("topic_test_message_forwarding");
+        let leader_address = String::from("127.0.0.1:5056");
+        let follower_address: String = String::from("127.0.0.1:5057");
+        let local_data_dir_path = String::from("/tmp/walrs/test_data/lead_partition");
+        let cancellation_token = CancellationToken::new();
+        let leader_tx: mpsc::Sender<PartitionCommand> = create_partition(
+            &topic_name,
+            0,
+            &leader_address,
+            PartitionRole::Leader {
+                followers: HashMap::from([(follower_address.clone(), 1)]),
+            },
+            &local_data_dir_path,
+            cancellation_token.child_token(),
+        )
+        .await
+        .unwrap();
+
+        let follower_data_dir_path = String::from("/tmp/walrs/test_data/follower_partition");
+        let _ = create_partition(
+            &topic_name,
+            1,
+            &follower_address,
+            PartitionRole::Follower {
+                leader_address: leader_address.clone(),
+            },
+            &follower_data_dir_path,
+            cancellation_token.child_token(),
+        )
+        .await
+        .unwrap();
+
+        let message = Message {
+            payload: "first test message".as_bytes().to_vec(),
+            key: Some("message_key".into()),
+            headers: HashMap::new(),
+        };
+
+        let (leader_oneshot_tx, leader_oneshot_rx) = oneshot::channel::<PartitionWriterResponse>();
+        let partition_writer_command: PartitionCommand = PartitionCommand::WriteMessages {
+            messages: vec![message],
+            tx: leader_oneshot_tx,
+        };
+        leader_tx.send(partition_writer_command).await.unwrap();
+        let leader_response = leader_oneshot_rx.await.unwrap();
+        match leader_response {
+            PartitionWriterResponse::MessagesPersisted { count } => {
+                assert_eq!(count, 1);
+            }
+        }
+
+        cancellation_token.cancel();
+    }
 }

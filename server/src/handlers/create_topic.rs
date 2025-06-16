@@ -211,7 +211,10 @@ fn find_nodes_for_topic(
         .enumerate()
         .map(|(index, (_, peer_address))| (peer_address.clone(), index + 1))
         .collect();
-    tracing::info!("Potential peers for topic: {:?}", potential_peers);
+    tracing::info!(
+        "Potential peers except this node, for topic: {:?}",
+        potential_peers
+    );
     potential_peers
 }
 

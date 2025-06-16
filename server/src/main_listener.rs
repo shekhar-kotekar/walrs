@@ -278,8 +278,8 @@ async fn handle_producer_request(
                         },
                     }
                 }
-                Ok(_) => ProducerResponse::Error {
-                    message: "Unexpected response from node manager".into(),
+                Ok(other) => ProducerResponse::Error {
+                    message: format!("Node manager error:{:?}", other),
                 },
                 Err(err) => ProducerResponse::Error {
                     message: format!("Failed to receive response from node manager: {}", err),
@@ -291,6 +291,7 @@ async fn handle_producer_request(
 
 #[cfg(test)]
 mod should {
+
     use commons::models::{AckLevel, AdminCommand, AdminResponse, Topic, WalrsCommand};
     use tokio::{io::AsyncWriteExt, net::TcpStream};
     use tracing_test::traced_test;
@@ -303,7 +304,7 @@ mod should {
     async fn return_accepted_response_when_a_command_is_sent() {
         let address: String = "127.0.0.1:8080".into();
         let (node_manager_tx, _) = mpsc::channel::<NodeManagerCommand>(2);
-        let node: MainListener = MainListener {
+        let main_listener: MainListener = MainListener {
             address: address.clone(),
             node_manager_tx,
         };
@@ -312,7 +313,9 @@ mod should {
         let cancellation_token: CancellationToken = CancellationToken::new();
         let node_cancellation_token = cancellation_token.child_token();
         tokio::spawn(async move {
-            node.start(task_tracker, node_cancellation_token).await;
+            main_listener
+                .start(task_tracker, node_cancellation_token)
+                .await;
         });
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let mut sender_stream = TcpStream::connect(address).await.unwrap();

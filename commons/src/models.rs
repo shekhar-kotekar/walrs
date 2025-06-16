@@ -229,10 +229,8 @@ impl Topic {
         if self.num_partitions < 1 {
             return Err("Number of partitions must be at least 1".to_string());
         }
-        if self.replication_factor < 1 || self.replication_factor > self.num_partitions {
-            return Err(
-                "Replication factor must be between 1 and the number of partitions".to_string(),
-            );
+        if self.replication_factor < 1 {
+            return Err("Replication factor must be greater than 0".to_string());
         }
         if self.retention_period_minutes == 0 {
             return Err("Retention period must be greater than 0".to_string());

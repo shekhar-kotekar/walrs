@@ -21,6 +21,7 @@ async fn main() {
     commons::init_tracing(Some(tracing::Level::DEBUG));
     // let pod_ip: String = env::var("POD_IP").unwrap_or("127.0.0.1".to_string());
 
+    //TODO: NodeConfig and NodeInfo are overlapping, consider refactoring
     let node_config: NodeConfig = get_node_config();
     let node_address = node_config.address.clone();
     let node_info: NodeInfo = NodeInfo::new(node_address.clone());
