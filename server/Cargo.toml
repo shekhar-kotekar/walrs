@@ -19,3 +19,9 @@ serde = "1.0.219"
 
 [dev-dependencies]
 tracing-test = "0.2.5"
+
+[profile.release]
+lto = true
+panic = "abort"
+strip = true
+codegen-units = 1

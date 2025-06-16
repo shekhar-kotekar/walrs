@@ -38,34 +38,6 @@ impl PartitionReader {
         }
     }
 
-    // async fn read_messages_from_file(
-    //     &mut self,
-    //     reader: &mut tokio::io::BufReader<tokio::fs::File>,
-    // ) -> Vec<Message> {
-    //     let mut messages = Vec::new();
-    //     let mut buf = String::new();
-
-    //     let mut lines_read = 0;
-    //     while lines_read < self.message_batch_size
-    //         && reader.read_line(&mut buf).await.unwrap_or_else(|error| {
-    //             panic!(
-    //                 "Failed to read line for partition: {}. Error: {}",
-    //                 self.partition_name, error
-    //             )
-    //         }) > 0
-    //     {
-    //         let payload = buf.trim().as_bytes().to_vec();
-    //         messages.push(Message {
-    //             key: None,
-    //             payload,
-    //             headers: HashMap::new(),
-    //         });
-    //         buf.clear();
-    //         lines_read += 1;
-    //     }
-    //     messages
-    // }
-
     pub async fn start(
         &mut self,
         mut main_rx: mpsc::Receiver<PartitionCommand>,
@@ -115,7 +87,7 @@ impl PartitionReader {
                                     }
                                     Err(e) => {
                                         PartitionReaderResponse::InternalError {
-                                            message: format!("Failed to read messages: {}", e),
+                                            message: format!("Error while reading messages: {}", e),
                                         }
                                     }
                                 }
@@ -172,6 +144,11 @@ impl PartitionReader {
         // let message_offset = INDEX_ENTRY_SIZE as u64 * 0; // Start from the beginning
         let message_offset = 0;
         index_file.seek(SeekFrom::Start(message_offset)).await?;
+        tracing::debug!(
+            "Reading from index file. offset: {}, record length: {}",
+            message_offset,
+            INDEX_ENTRY_SIZE
+        );
 
         let mut index_bytes = vec![0u8; INDEX_ENTRY_SIZE];
         index_file.read_exact(&mut index_bytes).await?;
@@ -179,29 +156,35 @@ impl PartitionReader {
             bincode::decode_from_slice(&index_bytes, bincode::config::standard())
                 .unwrap()
                 .0;
+        tracing::debug!("Read record index entry: {:?}", record_entry);
 
         data_file.seek(SeekFrom::Start(record_entry.offset)).await?;
 
-        let mut timestamp_bytes = [0u8; 8];
-        data_file.read_exact(&mut timestamp_bytes).await?;
-        let timestamp = i64::from_be_bytes(timestamp_bytes);
-
-        let mut length_bytes = [0u8; 4];
-        data_file.read_exact(&mut length_bytes).await?;
-        let length = u32::from_be_bytes(length_bytes);
-
-        let mut payload_bytes = vec![0u8; length as usize];
-        data_file.read_exact(&mut payload_bytes).await?;
-
+        let mut record_buffer = vec![0u8; record_entry.length as usize];
+        data_file.read_exact(&mut record_buffer).await?;
+        tracing::debug!(
+            "Read record from data file at offset {} with length {}",
+            record_entry.offset,
+            record_entry.length
+        );
+        let timestamp = i64::from_be_bytes(record_buffer[0..8].try_into().unwrap());
+        let payload_length = u32::from_be_bytes(record_buffer[8..12].try_into().unwrap());
+        let payload_bytes = record_buffer[12..].to_vec();
+        tracing::debug!(
+            "Read timestamp: {}, payload length: {}, payload bytes: {:?}",
+            timestamp,
+            payload_length,
+            payload_bytes
+        );
         let message = Message {
             key: None,
             payload: payload_bytes,
             headers: HashMap::new(),
         };
         tracing::info!(
-            "Read message with timestamp: {}, length: {}, payload: {:?}",
+            "message constructed from bytes. timestamp: {}, length: {}, payload: {:?}",
             timestamp,
-            length,
+            payload_length,
             message.payload
         );
 

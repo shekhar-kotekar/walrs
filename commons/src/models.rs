@@ -9,6 +9,10 @@ pub struct Message {
     pub headers: HashMap<String, String>,
 }
 
+impl Message {
+    pub const PAYLOAD_MAX_SIZE: u32 = 1024 * 1024; // 1 MB
+}
+
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
 pub enum AdminCommand {
     CreateTopic { topic: Topic },

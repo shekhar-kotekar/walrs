@@ -55,6 +55,7 @@ async fn main() {
                 AdminResponse::TopicInfo { topics } => {
                     tracing::info!("Topic info retrieved successfully: {:?}", topics);
                     send_messages(brokers.clone(), &topic.name).await;
+                    sleep(std::time::Duration::from_millis(2500));
                     read_messages(brokers, &topic.name).await;
                 }
                 AdminResponse::Error(err) => tracing::error!(err),
@@ -77,7 +78,15 @@ async fn read_messages(brokers: Vec<String>, topic: &str) {
     let consumer = Consumer::new(brokers.clone());
     match consumer.fetch_messages(topic).await {
         Ok(messages) => {
-            tracing::info!("Fetched messages: {:?}", messages);
+            tracing::info!("{} messages fetched.", messages.len());
+            messages.iter().for_each(|message| {
+                tracing::info!(
+                    "Received message: key: {:?}, payload: {}, headers: {:?}",
+                    message.key,
+                    String::from_utf8_lossy(&message.payload),
+                    message.headers
+                );
+            });
         }
         Err(e) => {
             tracing::error!("Failed to fetch messages: {}", e);
@@ -90,21 +99,18 @@ async fn send_messages(brokers: Vec<String>, topic: &str) {
     let messages = vec![
         Message {
             key: Some("key1".to_string()),
-            payload: "this is first message".as_bytes().to_vec(),
+            payload: "one".as_bytes().to_vec(),
             headers: HashMap::from([("first_msg_header".to_string(), "value1".to_string())]),
         },
         Message {
             key: Some("key2".to_string()),
-            payload: "this is second message".as_bytes().to_vec(),
+            payload: "two".as_bytes().to_vec(),
             headers: HashMap::from([("name".to_string(), "Shekhar".to_string())]),
         },
         Message {
             key: None,
-            payload: "this is third message".as_bytes().to_vec(),
-            headers: HashMap::from([
-                ("name".to_string(), "foo bar".to_string()),
-                ("age".to_string(), "23".to_string()),
-            ]),
+            payload: "three".as_bytes().to_vec(),
+            headers: HashMap::from([("age".to_string(), "23".to_string())]),
         },
     ];
 
