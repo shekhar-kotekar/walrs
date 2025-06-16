@@ -27,7 +27,8 @@ impl PartitionWriter {
         PartitionWriter {
             partition_name,
             partition_path,
-            flush_interval: tokio::time::interval(std::time::Duration::from_millis(500)),
+            //TODO: Read flush interval from config
+            flush_interval: tokio::time::interval(std::time::Duration::from_millis(300)),
         }
     }
 
@@ -52,10 +53,10 @@ impl PartitionWriter {
             .append(true)
             .open(data_file_path)
             .await
-            .unwrap_or_else(|_| {
+            .unwrap_or_else(|e| {
                 panic!(
-                    "Failed to open data file for partition: {}",
-                    self.partition_name
+                    "Failed to open data file for: {}, error: {}",
+                    self.partition_name, e
                 )
             });
 
@@ -64,10 +65,10 @@ impl PartitionWriter {
             .append(true)
             .open(index_file_path)
             .await
-            .unwrap_or_else(|_| {
+            .unwrap_or_else(|e| {
                 panic!(
-                    "Failed to open index file for partition: {}",
-                    self.partition_name
+                    "Failed to open index file for: {}, error: {}",
+                    self.partition_name, e
                 )
             });
 
@@ -179,16 +180,6 @@ impl PartitionWriter {
         )
         .unwrap();
         index_file.write_all(&index_entry_buffer).await?;
-
-        // let index_entry_bytes =
-        //     bincode::encode_to_vec(&index_entry, bincode::config::standard()).unwrap();
-
-        // tracing::debug!(
-        //     "Index entry bytes: {:?}, length: {}",
-        //     index_entry_bytes,
-        //     index_entry_bytes.len()
-        // );
-        // index_file.write_all(&index_entry_bytes).await?;
         Ok(())
     }
 }

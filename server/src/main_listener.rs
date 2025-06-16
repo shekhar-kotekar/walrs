@@ -240,12 +240,9 @@ async fn handle_producer_request(
     command: ProducerCommand,
     node_manager_tx: mpsc::Sender<NodeManagerCommand>,
 ) -> ProducerResponse {
-    tracing::info!("Received producer command: {:?}", command);
     match command {
         ProducerCommand::WriteMessages { topic, messages } => {
-            tracing::info!("Writing {} messages to topic: {}", messages.len(), topic);
-            // get partition writer for the topic from node manager
-            // send messages to the partition writer
+            tracing::info!("Writing {} messages for: {}", messages.len(), topic);
             let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeManagerResponse>();
             let command = NodeManagerCommand::GetPartitionWriter {
                 topic_name: topic,

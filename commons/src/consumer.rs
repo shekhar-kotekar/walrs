@@ -14,6 +14,7 @@ impl Consumer {
     }
 
     pub async fn fetch_messages(&self, topic: &str) -> Result<Vec<Message>, Error> {
+        tracing::info!("Fetching messages from: {}", &self.brokers[0]);
         let command = ConsumerCommand::FetchMessages {
             topic: topic.to_string(),
             offset: None,

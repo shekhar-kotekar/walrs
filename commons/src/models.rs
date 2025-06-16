@@ -1,16 +1,71 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    io::{Error, ErrorKind},
+};
 
 use bincode::{Decode, Encode};
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
 pub struct Message {
+    //TODO: Make these fields private so that
+    // they can only be accessed through the constructor and we can validate each field
     pub payload: Vec<u8>,
     pub key: Option<String>,
     pub headers: HashMap<String, String>,
 }
 
 impl Message {
-    pub const PAYLOAD_MAX_SIZE: u32 = 1024 * 1024; // 1 MB
+    pub const PAYLOAD_MAX_SIZE: usize = 1024 * 1024; // 1 MB
+    pub const HEADERS_MAX_COUNT: usize = 10;
+    pub const HEADER_KEY_MAX_LENGTH: usize = 50;
+    pub const HEADER_VALUE_MAX_LENGTH: usize = 100;
+    pub const KEY_MAX_LENGTH: usize = 50;
+
+    pub fn new(
+        payload: Vec<u8>,
+        key: Option<String>,
+        headers: HashMap<String, String>,
+    ) -> Result<Self, Error> {
+        Self::validate_message(&payload, &key, &headers)?;
+        Ok(Self {
+            payload,
+            key,
+            headers,
+        })
+    }
+
+    fn validate_message(
+        payload: &[u8],
+        key: &Option<String>,
+        headers: &HashMap<String, String>,
+    ) -> Result<(), Error> {
+        if payload.is_empty() || payload.len() > Self::PAYLOAD_MAX_SIZE {
+            return Err(Error::new(ErrorKind::InvalidInput, "Invalid payload size"));
+        }
+        if headers.len() > Self::HEADERS_MAX_COUNT {
+            return Err(Error::new(ErrorKind::InvalidInput, "Too many headers"));
+        }
+        for (header_key, header_value) in headers {
+            if header_key.is_empty() || header_key.len() > Self::HEADER_KEY_MAX_LENGTH {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "Invalid header key length",
+                ));
+            }
+            if header_value.is_empty() || header_value.len() > Self::HEADER_VALUE_MAX_LENGTH {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "Invalid header value length",
+                ));
+            }
+        }
+        if let Some(k) = key {
+            if k.is_empty() || k.len() > Self::KEY_MAX_LENGTH {
+                return Err(Error::new(ErrorKind::InvalidInput, "Invalid key length"));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
@@ -136,11 +191,11 @@ pub struct Topic {
     pub status: TopicStatus,
 }
 
-const DEFAULT_NUM_PARTITIONS: u8 = 3;
-const DEFAULT_REPLICATION_FACTOR: u8 = 3;
-const DEFAULT_RETENTION_PERIOD_MINUTES: u16 = 60;
-
 impl Topic {
+    const DEFAULT_NUM_PARTITIONS: u8 = 3;
+    const DEFAULT_REPLICATION_FACTOR: u8 = 3;
+    const DEFAULT_RETENTION_PERIOD_MINUTES: u16 = 60;
+
     pub fn new(
         name: String,
         num_partitions: Option<u8>,
@@ -150,10 +205,10 @@ impl Topic {
     ) -> Result<Self, String> {
         let new_topic = Self {
             name,
-            num_partitions: num_partitions.unwrap_or(DEFAULT_NUM_PARTITIONS),
-            replication_factor: replication_factor.unwrap_or(DEFAULT_REPLICATION_FACTOR),
+            num_partitions: num_partitions.unwrap_or(Self::DEFAULT_NUM_PARTITIONS),
+            replication_factor: replication_factor.unwrap_or(Self::DEFAULT_REPLICATION_FACTOR),
             retention_period_minutes: retention_period_minutes
-                .unwrap_or(DEFAULT_RETENTION_PERIOD_MINUTES),
+                .unwrap_or(Self::DEFAULT_RETENTION_PERIOD_MINUTES),
             ack_level: ack_level.unwrap_or(AckLevel::Leader),
             partitions: Vec::new(),
             status: TopicStatus::CreationInProgress,

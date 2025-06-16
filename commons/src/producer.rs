@@ -45,7 +45,7 @@ impl Producer {
             let mut total_message_persisted = 0;
             for (node_address, (topic_name, messages)) in mapped_messages {
                 let result = self
-                    .send_messages_to_node(&node_address, topic_name, messages)
+                    .send_messages_to_node(&node_address, &topic_name, messages)
                     .await;
                 match result {
                     ProducerResponse::MessagesPersisted { count } => {
@@ -72,13 +72,19 @@ impl Producer {
     async fn send_messages_to_node(
         &self,
         node_address: &str,
-        topic_name: String,
+        topic_name: &str,
         messages: Vec<Message>,
     ) -> ProducerResponse {
         let producer_command = ProducerCommand::WriteMessages {
-            topic: topic_name,
-            messages,
+            topic: topic_name.to_string(),
+            messages: messages.clone(),
         };
+        tracing::debug!(
+            "Sending messages to node: {}, topic: {}, messages: {:?}",
+            node_address,
+            topic_name,
+            messages
+        );
         send_and_receive_producer_command(producer_command, node_address).await
     }
 
@@ -90,6 +96,7 @@ impl Producer {
         let mut messages_mapped_to_nodes: HashMap<String, (String, Vec<Message>)> = HashMap::new();
         let mut hasher = DefaultHasher::new();
         for (topic, messages) in &self.buffer {
+            // key: partition number, value: leader address
             let partition_leaders: HashMap<u8, String> = topic_info
                 .get(topic)
                 .unwrap()

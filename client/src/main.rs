@@ -39,11 +39,9 @@ async fn main() {
         .await;
     match response {
         AdminResponse::RequestAccepted => {
-            tracing::info!(
-                "Cluster admin command executed successfully: {:?}",
-                admin_command
-            );
+            tracing::info!("Request to create topic accepted");
             sleep(std::time::Duration::from_millis(500));
+
             let get_topic_info_command = AdminCommand::GetTopicInfo {
                 topic_names: vec![topic.name.clone()],
             };
@@ -55,7 +53,7 @@ async fn main() {
                 AdminResponse::TopicInfo { topics } => {
                     tracing::info!("Topic info retrieved successfully: {:?}", topics);
                     send_messages(brokers.clone(), &topic.name).await;
-                    sleep(std::time::Duration::from_millis(2500));
+                    sleep(std::time::Duration::from_millis(500));
                     read_messages(brokers, &topic.name).await;
                 }
                 AdminResponse::Error(err) => tracing::error!(err),
@@ -64,12 +62,8 @@ async fn main() {
                 }
             }
         }
-        AdminResponse::Error(err) => {
-            tracing::error!(err);
-        }
-        _ => {
-            tracing::error!("Unexpected response type: {:?}", response);
-        }
+        AdminResponse::Error(err) => tracing::error!(err),
+        _ => tracing::error!("Unexpected response type: {:?}", response),
     }
     tracing::info!("Cluster admin command executed successfully.");
 }
@@ -81,7 +75,7 @@ async fn read_messages(brokers: Vec<String>, topic: &str) {
             tracing::info!("{} messages fetched.", messages.len());
             messages.iter().for_each(|message| {
                 tracing::info!(
-                    "Received message: key: {:?}, payload: {}, headers: {:?}",
+                    "message: key: {:?}, payload: {}, headers: {:?}",
                     message.key,
                     String::from_utf8_lossy(&message.payload),
                     message.headers
