@@ -96,11 +96,11 @@ impl PartitionReader {
                                     message: format!("Received read request for different topic: {}", topic_name),
                                 }
                             };
-                            tx.send(response).unwrap_or_else(|send_error| {
+                            tx.send(response).unwrap_or_else(|err| {
                                 tracing::error!(
-                                    "Failed to send response for partition {}: {:?}",
+                                    "Failed to send response:{}: {:?}",
                                     self.partition_name,
-                                    send_error
+                                    err
                                 );
                             });
                         }
@@ -109,7 +109,6 @@ impl PartitionReader {
                         }
                     }
                 }
-
                 _ = cancellation_token.cancelled() => {
                     tracing::info!("Cancellation token called. Partition reader shutting down: {}", self.partition_name);
                     let _ = reader.shutdown().await;
@@ -127,9 +126,23 @@ impl PartitionReader {
         index_file: &mut File,
     ) -> Result<Vec<Message>, std::io::Error> {
         let mut messages: Vec<Message> = Vec::new();
-        for _ in 0..self.message_batch_size {
-            let message = self.read_message_using_index(data_file, index_file).await?;
-            messages.push(message);
+        for message_number in 0..self.message_batch_size {
+            match self
+                .read_message_using_index(data_file, index_file, message_number)
+                .await
+            {
+                Ok(message) => {
+                    messages.push(message);
+                }
+                Err(e) => {
+                    if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                        tracing::warn!("EOF while reading messages: {}", self.partition_name);
+                        break;
+                    } else {
+                        return Err(e); // Propagate other errors
+                    }
+                }
+            }
         }
         Ok(messages)
     }
@@ -138,11 +151,11 @@ impl PartitionReader {
         &self,
         data_file: &mut File,
         index_file: &mut File,
+        message_number: u16,
     ) -> Result<Message, std::io::Error> {
         //TODO: Identify EOF and return an error or empty message
         //TODO: For time being we will always start reading from the beginning of the file.
-        // let message_offset = INDEX_ENTRY_SIZE as u64 * 0; // Start from the beginning
-        let message_offset = 0;
+        let message_offset = INDEX_ENTRY_SIZE as u64 * message_number as u64; // Start from the beginning
         index_file.seek(SeekFrom::Start(message_offset)).await?;
         tracing::debug!(
             "Reading from index file. offset: {}, record length: {}",
