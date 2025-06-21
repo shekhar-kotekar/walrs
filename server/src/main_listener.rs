@@ -1,6 +1,5 @@
 use commons::models::{
-    ConsumerCommand, ConsumerResponse, PeerCommand, PeerResponse, ProducerCommand,
-    ProducerResponse, WalrsCommand, WalrsResponse,
+    ConsumerCommand, ConsumerResponse, PeerCommand, PeerResponse, WalrsCommand, WalrsResponse,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -13,8 +12,8 @@ use tokio::{
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 use crate::{
-    handlers::admin,
-    models::{PartitionCommand, PartitionReaderResponse, PartitionWriterResponse},
+    handlers::{admin, producer},
+    models::{PartitionCommand, PartitionReaderResponse},
     node_manager::{NodeManagerCommand, NodeManagerResponse},
 };
 
@@ -39,8 +38,9 @@ impl MainListener {
                     tracing::info!("connection accepted from: {:?}", stream.peer_addr());
                     let client_request_cancellation_token = cancellation_token.child_token();
                     let node_manager_tx_clone = self.node_manager_tx.clone();
+                    let self_address = self.address.clone();
                     task_tracker.spawn(async move {
-                        MainListener::process_request(stream, node_manager_tx_clone, client_request_cancellation_token).await;
+                        MainListener::process_request(stream, self_address, node_manager_tx_clone, client_request_cancellation_token).await;
                     });
                 }
             } => {
@@ -70,6 +70,7 @@ impl MainListener {
 
     async fn process_request(
         mut stream: TcpStream,
+        self_address: String,
         node_manager_tx: mpsc::Sender<NodeManagerCommand>,
         cancellation_token: CancellationToken,
     ) {
@@ -85,7 +86,7 @@ impl MainListener {
                                 WalrsResponse::Admin(admin::handle_admin_request(admin_command, node_manager_tx).await)
                             }
                             WalrsCommand::Producer(producer_command) => {
-                                WalrsResponse::Producer(handle_producer_request(producer_command, node_manager_tx).await)
+                                WalrsResponse::Producer(producer::handle_producer_request(producer_command, &self_address, node_manager_tx).await)
                             }
                             WalrsCommand::Consumer(consumer_command) => {
                                 WalrsResponse::Consumer(handle_consumer_request(consumer_command, node_manager_tx).await)
@@ -115,6 +116,13 @@ async fn handle_peer_request(
     node_manager_tx: mpsc::Sender<NodeManagerCommand>,
 ) -> PeerResponse {
     match command {
+        PeerCommand::SyncMessages {
+            topic_name: _,
+            partition_number: _,
+            messages: _,
+        } => PeerResponse::Error {
+            message: "SyncMessages command is not implemented yet.".to_string(),
+        },
         PeerCommand::Heartbeat { node_info } => {
             let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeManagerResponse>();
             let node_manager_command = NodeManagerCommand::Heartbeat {
@@ -231,59 +239,6 @@ async fn handle_consumer_request(
                     "Failed to receive response from node manager: {}",
                     err
                 )),
-            }
-        }
-    }
-}
-
-async fn handle_producer_request(
-    command: ProducerCommand,
-    node_manager_tx: mpsc::Sender<NodeManagerCommand>,
-) -> ProducerResponse {
-    match command {
-        ProducerCommand::WriteMessages { topic, messages } => {
-            tracing::info!("Writing {} messages for: {}", messages.len(), topic);
-            let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeManagerResponse>();
-            let command = NodeManagerCommand::GetPartitionWriter {
-                topic_name: topic,
-                tx: oneshot_tx,
-            };
-            if let Err(err) = node_manager_tx.send(command).await {
-                return ProducerResponse::Error {
-                    message: format!("Failed to send command to node manager: {}", err),
-                };
-            }
-            match oneshot_rx.await {
-                Ok(NodeManagerResponse::PartitionWriter { writer }) => {
-                    let (pw_oneshot_tx, pw_oneshot_rx) =
-                        oneshot::channel::<PartitionWriterResponse>();
-                    let partition_command: PartitionCommand = PartitionCommand::WriteMessages {
-                        messages,
-                        tx: pw_oneshot_tx,
-                    };
-                    if let Err(err) = writer.send(partition_command).await {
-                        return ProducerResponse::Error {
-                            message: format!("Failed to send command to partition writer: {}", err),
-                        };
-                    }
-                    match pw_oneshot_rx.await {
-                        Ok(PartitionWriterResponse::MessagesPersisted { count }) => {
-                            ProducerResponse::MessagesPersisted { count }
-                        }
-                        Err(err) => ProducerResponse::Error {
-                            message: format!(
-                                "Response not received from partition writer: {}",
-                                err
-                            ),
-                        },
-                    }
-                }
-                Ok(other) => ProducerResponse::Error {
-                    message: format!("Node manager error:{:?}", other),
-                },
-                Err(err) => ProducerResponse::Error {
-                    message: format!("Failed to receive response from node manager: {}", err),
-                },
             }
         }
     }

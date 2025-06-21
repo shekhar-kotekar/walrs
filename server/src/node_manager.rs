@@ -1,16 +1,17 @@
 use std::collections::{HashMap, hash_map::Entry};
 
-use commons::models::{NodeInfo, PartitionRole, Topic, TopicStatus};
+use commons::models::{NodeInfo, PartitionInfo, PartitionRole, Topic, TopicStatus};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
     handlers::{
+        create_partitions::create_local_partition,
         create_topic::{self, TopicManagerResponse},
         heartbeat,
     },
     models::{ClusterInfo, NodeConfig, PartitionCommand},
-    partition_managers::{partition_reader::PartitionReader, partition_writer::create_partition},
+    partition_managers::partition_reader::PartitionReader,
 };
 
 // this is broker struct in old code.
@@ -18,8 +19,14 @@ pub struct NodeManager {
     node_config: NodeConfig,
     cluster_info: ClusterInfo,
     heartbeat_interval: tokio::time::Interval,
+
+    //key: topic name, value: partition writer
     local_partition_writers: HashMap<String, mpsc::Sender<PartitionCommand>>,
+
+    //key: topic name, value: partition reader
     local_partition_readers: HashMap<String, mpsc::Sender<PartitionCommand>>,
+
+    // key: topic name, value: Topic metadata
     topic_metadata: HashMap<String, Topic>,
 }
 
@@ -103,8 +110,8 @@ impl NodeManager {
                                 cancellation_token.child_token(),
                             ).await;
                         }
-                        NodeManagerCommand::GetPartitionWriter { topic_name, tx } => {
-                            self.handle_get_partition_writer(topic_name, tx).await;
+                        NodeManagerCommand::GetPartitionWriter { topic_name, partition_number, tx } => {
+                            self.handle_get_partition_writer(topic_name, partition_number, tx).await;
                         }
                         NodeManagerCommand::GetPartitionReader { topic_name, tx } => {
                             self.handle_get_partition_reader(topic_name, tx, cancellation_token.child_token()).await;
@@ -190,20 +197,29 @@ impl NodeManager {
     async fn handle_get_partition_writer(
         &mut self,
         topic_name: String,
+        partition_number: u8,
         tx: oneshot::Sender<NodeManagerResponse>,
     ) {
-        tracing::debug!("Getting partition writer for topic: {}", topic_name);
-        let partition_writer: Option<mpsc::Sender<PartitionCommand>> = self
-            .local_partition_writers
-            .iter()
-            .filter(|(key, _)| key.starts_with(&topic_name))
-            .map(|(_, sender)| sender.clone())
-            .next();
+        let key = format!("{}-{}", topic_name, partition_number);
+        tracing::debug!("Getting partition writer for: {}", key);
 
-        let response = if let Some(writer) = partition_writer {
-            NodeManagerResponse::PartitionWriter { writer }
+        let response = if let Some(writer) = self.local_partition_writers.get(&key) {
+            let topic_metadata = self.topic_metadata.get(&topic_name).unwrap();
+            let partition_info: &PartitionInfo = topic_metadata
+                .partitions
+                .iter()
+                .find(|partition| partition.leader_address == self.node_config.address)
+                .unwrap();
+            assert_eq!(
+                partition_info.number, partition_number,
+                "Partition number mismatch for topic: {}",
+                topic_name
+            );
+            NodeManagerResponse::PartitionWriter {
+                writer: writer.clone(),
+            }
         } else {
-            tracing::warn!("No partition writer found for topic: {}", topic_name);
+            tracing::warn!("No partition writer found for: {}", key);
             NodeManagerResponse::NotFound
         };
         tx.send(response).unwrap_or_else(|_| {
@@ -220,44 +236,42 @@ impl NodeManager {
         cancellation_token: CancellationToken,
     ) {
         tracing::info!(
-            "Creating partition writer for topic: {}, partition: {}, role: {:?}",
+            "Creating partition writer. Topic: {}, partition: {}, role: {:?}",
             topic_name,
             partition_number,
             role
         );
         let key_name = format!("{}-{}", topic_name, partition_number);
-        let response: NodeManagerResponse = match self
-            .local_partition_writers
-            .entry(key_name.clone())
-        {
-            Entry::Occupied(_) => {
-                tracing::warn!("Partition writer already exists: {}", key_name);
-                NodeManagerResponse::PartitionWriterAlreadyExists
-            }
-            Entry::Vacant(entry) => {
-                match create_partition(
-                    &topic_name,
-                    partition_number,
-                    &self.node_config.address,
-                    role.clone(),
-                    &self.node_config.base_path_for_data,
-                    cancellation_token,
-                )
-                .await
-                {
-                    Some(partition_writer_tx) => {
-                        entry.insert(partition_writer_tx.clone());
-                        NodeManagerResponse::PartitionWriterCreated
-                    }
-                    None => NodeManagerResponse::Error {
-                        message: format!(
-                            "Failed to create partition for topic: {}, partition number: {}, role: {:?}",
-                            topic_name, partition_number, role
-                        ),
-                    },
+        let response: NodeManagerResponse =
+            match self.local_partition_writers.entry(key_name.clone()) {
+                Entry::Occupied(_) => {
+                    tracing::warn!("Partition writer already exists: {}", key_name);
+                    NodeManagerResponse::PartitionWriterAlreadyExists
                 }
-            }
-        };
+                Entry::Vacant(entry) => {
+                    match create_local_partition(
+                        &topic_name,
+                        partition_number,
+                        &self.node_config.address,
+                        role.clone(),
+                        &self.node_config.base_path_for_data,
+                        cancellation_token,
+                    )
+                    .await
+                    {
+                        Some(partition_writer_tx) => {
+                            entry.insert(partition_writer_tx.clone());
+                            NodeManagerResponse::PartitionWriterCreated
+                        }
+                        None => NodeManagerResponse::Error {
+                            message: format!(
+                                "partition not created for topic: {}, partition: {}, role: {:?}",
+                                topic_name, partition_number, role
+                            ),
+                        },
+                    }
+                }
+            };
         tx.send(response).unwrap_or_else(|_| {
             tracing::error!("Failed to send partition writer response.");
         });
@@ -321,6 +335,7 @@ pub enum NodeManagerCommand {
     },
     GetPartitionWriter {
         topic_name: String,
+        partition_number: u8,
         tx: oneshot::Sender<NodeManagerResponse>,
     },
     GetPartitionReader {

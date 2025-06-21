@@ -78,6 +78,7 @@ pub enum AdminCommand {
 pub enum ProducerCommand {
     WriteMessages {
         topic: String,
+        partition_number: u8,
         messages: Vec<Message>,
     },
 }
@@ -121,10 +122,12 @@ pub enum ProducerResponse {
     Error { message: String },
     MessagesPersisted { count: u8 },
     RequestAccepted,
+    Redirect { leader_address: String },
 }
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
 pub enum PartitionRole {
+    // key: follower address, value: partition number
     Leader { followers: HashMap<String, usize> },
     Follower { leader_address: String },
 }
@@ -139,6 +142,11 @@ pub enum PeerCommand {
     Heartbeat {
         node_info: NodeInfo,
     },
+    SyncMessages {
+        topic_name: String,
+        partition_number: u8,
+        messages: Vec<Message>,
+    },
 }
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
@@ -146,6 +154,7 @@ pub enum PeerResponse {
     PartitionWriterCreated,
     HeartbeatAcknowledged,
     Error { message: String },
+    MessagesSynced { count: u8 },
 }
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq)]
@@ -165,6 +174,8 @@ impl NodeInfo {
 
 #[derive(Debug, Clone, PartialEq, Encode, Decode)]
 pub enum AckLevel {
+    // TODO: Enable none later
+    // None,
     // Acknowledgment sent immediately after the leader has written the messages to its Write Ahead Log (WAL)
     Leader,
     // Acknowledgment sent when majority of followers have written the messages to their WALs

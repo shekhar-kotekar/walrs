@@ -30,6 +30,7 @@ impl ClusterInfo {
 #[derive(Debug)]
 pub enum PartitionWriterResponse {
     MessagesPersisted { count: u8 },
+    Error { message: String },
 }
 
 #[derive(Debug)]
