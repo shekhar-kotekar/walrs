@@ -35,17 +35,20 @@ impl Producer {
         if self.buffer.is_empty() {
             tracing::warn!("Producer buffer is empty, nothing to flush.");
             Ok(ProducerResponse::Error {
-                message: String::from("Buffer is empty"),
+                message: String::from("Buffer is empty, nothing to send."),
             })
         } else {
+            //key: topic name, value: Topic information
             let topic_info: HashMap<String, Topic> = self.get_topic_info().await?;
-            let mapped_messages: HashMap<String, (String, Vec<Message>)> =
+
+            // key: broker_address, value: tuple (topic_name, partition number, vector of messages to be sent to that broker)
+            let mapped_messages: HashMap<String, (String, u8, Vec<Message>)> =
                 self.map_messages_to_nodes(&topic_info);
 
             let mut total_message_persisted = 0;
-            for (node_address, (topic_name, messages)) in mapped_messages {
+            for (node_address, (topic_name, partition_number, messages)) in mapped_messages {
                 let result = self
-                    .send_messages_to_node(&node_address, &topic_name, messages)
+                    .send_messages_to_node(&node_address, &topic_name, partition_number, messages)
                     .await;
                 match result {
                     ProducerResponse::MessagesPersisted { count } => {
@@ -73,16 +76,19 @@ impl Producer {
         &self,
         node_address: &str,
         topic_name: &str,
+        partition_number: u8,
         messages: Vec<Message>,
     ) -> ProducerResponse {
         let producer_command = ProducerCommand::WriteMessages {
             topic: topic_name.to_string(),
+            partition_number,
             messages: messages.clone(),
         };
         tracing::debug!(
-            "Sending messages to node: {}, topic: {}, messages: {:?}",
+            "Sending messages to node: {}, topic: {}, partition: {}, messages: {:?}",
             node_address,
             topic_name,
+            partition_number,
             messages
         );
         send_and_receive_producer_command(producer_command, node_address).await
@@ -91,9 +97,10 @@ impl Producer {
     fn map_messages_to_nodes(
         &self,
         topic_info: &HashMap<String, Topic>,
-    ) -> HashMap<String, (String, Vec<Message>)> {
-        // key is broker address, value is a key pair of (topic_name, vector of messages to be sent to that broker)
-        let mut messages_mapped_to_nodes: HashMap<String, (String, Vec<Message>)> = HashMap::new();
+    ) -> HashMap<String, (String, u8, Vec<Message>)> {
+        // key: broker address, value: tuple of (topic_name, partition number, vector of messages to be sent to that broker)
+        let mut messages_mapped_to_nodes: HashMap<String, (String, u8, Vec<Message>)> =
+            HashMap::new();
         let mut hasher = DefaultHasher::new();
         for (topic, messages) in &self.buffer {
             // key: partition number, value: leader address
@@ -131,11 +138,11 @@ impl Producer {
                 match messages_mapped_to_nodes.entry(node_address.clone()) {
                     Entry::Vacant(entry) => {
                         //TODO: We are copying messages many times. We should optimize this.
-                        entry.insert((topic.clone(), vec![message.clone()]));
+                        entry.insert((topic.clone(), partition_number, vec![message.clone()]));
                     }
                     Entry::Occupied(mut occupied_entry) => {
                         //TODO: We are copying messages many times. We should optimize this.
-                        occupied_entry.get_mut().1.push(message.clone());
+                        occupied_entry.get_mut().2.push(message.clone());
                     }
                 }
             }
@@ -267,10 +274,10 @@ mod should {
         ]
         .into_iter()
         .collect();
-        let mapped_messages: HashMap<String, (String, Vec<Message>)> =
+        let mapped_messages: HashMap<String, (String, u8, Vec<Message>)> =
             producer.map_messages_to_nodes(&topic_info);
         assert_eq!(mapped_messages.len(), 3);
-        for (node_address, (topic_name, messages)) in mapped_messages {
+        for (node_address, (topic_name, _, messages)) in mapped_messages {
             assert!(
                 ["127.0.0.1:5075", "127.0.0.1:5076", "127.0.0.1:5077"]
                     .contains(&node_address.as_str())

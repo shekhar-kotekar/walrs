@@ -1,6 +1,4 @@
-use std::vec;
-
-use commons::models::{Message, PartitionRole, PeerCommand, PeerResponse};
+use commons::models::Message;
 use tokio::fs::File;
 use tokio::io::AsyncSeekExt;
 use tokio::sync::mpsc;
@@ -43,10 +41,7 @@ impl PartitionWriter {
         );
 
         let data_file_path = format!("{}/data.log", self.partition_path);
-        tracing::debug!("Partition data will be stored in {}", data_file_path);
-
         let index_file_path = format!("{}/index.log", self.partition_path);
-        tracing::debug!("Partition index will be stored in {}", index_file_path);
 
         let mut data_file = OpenOptions::new()
             .create(true)
@@ -182,101 +177,4 @@ impl PartitionWriter {
         index_file.write_all(&index_entry_buffer).await?;
         Ok(())
     }
-}
-
-pub async fn create_partition(
-    topic_name: &String,
-    partition_number: u8,
-    self_address: &str,
-    partition_role: PartitionRole,
-    local_data_dir_path: &String,
-    cancellation_token: CancellationToken,
-) -> Option<mpsc::Sender<PartitionCommand>> {
-    tracing::info!(
-        "Creating partition {} for topic: {}, role: {:?}",
-        partition_number,
-        topic_name,
-        partition_role
-    );
-    let (partition_writer_tx, partition_writer_rx) = mpsc::channel::<PartitionCommand>(10);
-
-    let mut partition_writer =
-        PartitionWriter::new(topic_name, partition_number, local_data_dir_path);
-
-    tokio::spawn(async move {
-        partition_writer
-            .start(partition_writer_rx, cancellation_token)
-            .await;
-    });
-
-    match partition_role {
-        PartitionRole::Leader { followers } => {
-            tracing::info!(
-                "Leader partition created for topic: {}, partition: {}, partition followers: {:?}",
-                topic_name,
-                partition_number,
-                followers
-            );
-            let peers = followers.keys().cloned().collect::<Vec<String>>();
-            let all_peers_created_followers =
-                create_partition_followers(topic_name, partition_number, peers, self_address).await;
-            if all_peers_created_followers {
-                Some(partition_writer_tx)
-            } else {
-                tracing::error!(
-                    "Failed to request peers to create follower partitions. topic: {}, partition: {}",
-                    topic_name,
-                    partition_number
-                );
-                None
-            }
-        }
-        PartitionRole::Follower { leader_address } => {
-            tracing::info!(
-                "Created follower partition {} for topic: {}, leader address: {}",
-                partition_number,
-                topic_name,
-                leader_address
-            );
-            Some(partition_writer_tx)
-        }
-    }
-}
-
-async fn create_partition_followers(
-    topic_name: &String,
-    partition_number: u8,
-    peers: Vec<String>,
-    self_address: &str,
-) -> bool {
-    for peer in peers {
-        let peer_command = PeerCommand::CreatePartitionWriter {
-            topic_name: topic_name.clone(),
-            partition_number,
-            role: PartitionRole::Follower {
-                leader_address: self_address.to_string(),
-            },
-        };
-        match commons::send_and_receive_peer_command(peer_command, &peer).await {
-            PeerResponse::PartitionWriterCreated => {
-                tracing::info!(
-                    "Peer {} created follower partition for topic: {}, partition: {}",
-                    peer,
-                    topic_name,
-                    partition_number
-                );
-            }
-            other_response => {
-                tracing::error!(
-                    "Peer {} responded with unexpected response: {:?} for topic: {}, partition: {}",
-                    peer,
-                    other_response,
-                    topic_name,
-                    partition_number
-                );
-                return false;
-            }
-        }
-    }
-    true
 }

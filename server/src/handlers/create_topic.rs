@@ -1,14 +1,13 @@
-use std::{collections::HashMap, io::ErrorKind};
+use std::collections::HashMap;
 
-use commons::models::{
-    PartitionInfo, PartitionRole, PeerCommand, PeerResponse, Topic, TopicStatus,
-};
+use commons::models::{PartitionInfo, PartitionRole, Topic, TopicStatus};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    handlers::create_partitions::create_local_partition,
+    handlers::create_partitions::create_remote_lead_partitions,
     models::{ClusterInfo, PartitionCommand},
-    partition_managers::partition_writer::create_partition,
 };
 
 #[derive(Debug)]
@@ -39,7 +38,7 @@ pub async fn create_topic(
             broker_tx
                 .send(TopicManagerResponse::TopicCreationFailed {
                     topic_name,
-                    error: "Topic creation was cancelled.".to_string(),
+                    error: "Topic creation cancelled.".to_string(),
                 })
                 .await
                 .expect("Failed to send topic creation failed command to broker");
@@ -59,30 +58,31 @@ pub async fn create_topic(
             let selected_nodes_for_topic: HashMap<String, usize> =
                 find_nodes_for_topic(&self_address, topic_clone.num_partitions, &cluster_info);
             // step 2: create local partition writer for partition 0
-            let local_partition_writer_cancellation_token = cancellation_token.child_token();
             let partition_zero = 0;
 
-            let partition_zero_tx: Option<mpsc::Sender<PartitionCommand>> = create_partition(&topic_clone.name,
+            // TODO: As of now we are creating partitions one by one, serially.
+            // In future we should create all partitions in parallel, preferably using different Tokio tasks.
+            // This will allow us to create partitions faster and utilize resources better.
+            tracing::warn!("Creating partitions serially, this will be improved in future releases.");
+            let result = create_local_partition(&topic_clone.name,
                 partition_zero,
                 &self_address,
                 PartitionRole::Leader {followers: selected_nodes_for_topic.clone()},
                 &local_data_dir_path,
-                local_partition_writer_cancellation_token).await;
+                cancellation_token.child_token()).await;
 
-            match partition_zero_tx {
-                Some(partition_zero_tx) => {
-                    tracing::info!("Partition 0 created for topic: {}", topic_clone.name);
-
+            match result {
+                Some(partition_zero_tx ) => {
                     let partition_zero_info = PartitionInfo {
-                        number: partition_zero,
-                        leader_address: self_address.clone(),
-                        follower_addresses: selected_nodes_for_topic.keys().cloned().collect(),
-                    };
+                    number: 0,
+                    leader_address: self_address.to_string(),
+                    follower_addresses: selected_nodes_for_topic.clone().keys().cloned().collect(),
+                };
                     let mut partitions: Vec<PartitionInfo> = vec![partition_zero_info];
 
                     match create_remote_lead_partitions(&topic_clone.name, &self_address, selected_nodes_for_topic).await {
-                        Ok(remote_partitions) => {
-                            partitions.extend(remote_partitions);
+                        Ok(remote_partitions_info) => {
+                            partitions.extend(remote_partitions_info);
                             topic_clone.add_partitions(partitions);
                             topic_clone.status = TopicStatus::ReadyToServe;
                             tracing::debug!(
@@ -124,68 +124,28 @@ pub async fn create_topic(
     }
 }
 
-async fn create_remote_lead_partitions(
-    topic_name: &String,
-    self_address: &str,
-    potential_peers: HashMap<String, usize>,
-) -> Result<Vec<PartitionInfo>, std::io::Error> {
-    let mut partition_infos = Vec::new();
-    for (partition_leader_peer_address, partition_number) in potential_peers.iter() {
-        let mut followers: HashMap<String, usize> = potential_peers
-            .iter()
-            .filter(|(address, _)| *address != partition_leader_peer_address)
-            .map(|(address, index)| (address.clone(), *index))
-            .collect();
-        followers.insert(self_address.to_owned(), 0); // add self as a follower with index 0
-        let command = PeerCommand::CreatePartitionWriter {
-            topic_name: topic_name.clone(),
-            partition_number: *partition_number as u8,
-            role: PartitionRole::Leader {
-                followers: followers.clone(),
-            },
-        };
-        tracing::info!(
-            "Requesting peer {} to create lead partition. Topic: {}, partition: {}",
-            partition_leader_peer_address,
-            topic_name,
-            partition_number
-        );
-        match commons::send_and_receive_peer_command(command, partition_leader_peer_address).await {
-            PeerResponse::PartitionWriterCreated => {
-                tracing::info!(
-                    "Peer {} successfully created lead partition. Topic: {}, partition: {}",
-                    partition_leader_peer_address,
-                    topic_name,
-                    partition_number
-                );
-                let partition_info = PartitionInfo {
-                    number: *partition_number as u8,
-                    leader_address: partition_leader_peer_address.clone(),
-                    follower_addresses: followers.keys().cloned().collect(),
-                };
-                partition_infos.push(partition_info);
-            }
-            other_response => {
-                tracing::error!(
-                    "Peer {} responded with unexpected response: {:?}. topic: {}, partition: {}",
-                    partition_leader_peer_address,
-                    other_response,
-                    topic_name,
-                    partition_number
-                );
-                return Err(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!(
-                        "Unexpected response from peer {}. topic: {}, partition: {}",
-                        partition_leader_peer_address, topic_name, partition_number
-                    ),
-                ));
-            }
-        }
-    }
-
-    Ok(partition_infos)
-}
+// fn update_partition_info_to_topic(
+//     topic: &mut Topic,
+//     self_address: &str,
+//     nodes_in_cluster: &mut HashMap<String, usize>,
+// ) {
+//     nodes_in_cluster.insert(self_address.to_owned(), 0);
+//     // add partition info to topic
+//     for (peer_address, partition_number) in nodes_in_cluster.iter() {
+//         let partition_followers: HashMap<String, usize> = nodes_in_cluster
+//             .iter()
+//             .filter(|(address, _)| *address != peer_address)
+//             .map(|(address, index)| (address.clone(), *index))
+//             .collect();
+//         let partition_info = PartitionInfo {
+//             number: *partition_number as u8,
+//             leader_address: peer_address.clone(),
+//             follower_addresses: partition_followers.keys().cloned().collect(),
+//         };
+//         tracing::info!("Added partition info: {:?}", &partition_info);
+//         topic.add_partition(partition_info);
+//     }
+// }
 
 fn find_nodes_for_topic(
     self_address: &String,
@@ -197,6 +157,7 @@ fn find_nodes_for_topic(
     // we will use this to distribute partitions across peers
 
     // sort peers by number of registered topics in descending order
+    // node on which topic is being created will be excluded from the list because it will be the leader for partition 0
     let mut peers_sorted_by_number_of_topics: Vec<(usize, String)> = cluster_info
         .nodes
         .iter()
@@ -205,13 +166,15 @@ fn find_nodes_for_topic(
         .collect();
     peers_sorted_by_number_of_topics.sort_by_key(|&(topic_count, _)| topic_count);
 
+    // key: peer address, value: partition number for which peer is a leader
     let potential_peers: HashMap<String, usize> = peers_sorted_by_number_of_topics
         .iter()
         .take(num_partitions as usize)
         .enumerate()
         .map(|(index, (_, peer_address))| (peer_address.clone(), index + 1))
         .collect();
-    tracing::info!("Potential peers for topic: {:?}", potential_peers);
+
+    tracing::info!("Potential peers excluding this node: {:?}", potential_peers);
     potential_peers
 }
 

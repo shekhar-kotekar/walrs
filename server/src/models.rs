@@ -30,6 +30,7 @@ impl ClusterInfo {
 #[derive(Debug)]
 pub enum PartitionWriterResponse {
     MessagesPersisted { count: u8 },
+    Error { message: String },
 }
 
 #[derive(Debug)]
@@ -50,7 +51,7 @@ pub enum PartitionCommand {
     },
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 pub struct NodeConfig {
     pub address: String,
     pub peers: Vec<String>,
