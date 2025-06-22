@@ -60,6 +60,10 @@ pub async fn create_topic(
             // step 2: create local partition writer for partition 0
             let partition_zero = 0;
 
+            // TODO: As of now we are creating partitions one by one, serially.
+            // In future we should create all partitions in parallel, preferably using different Tokio tasks.
+            // This will allow us to create partitions faster and utilize resources better.
+            tracing::warn!("Creating partitions serially, this will be improved in future releases.");
             let result = create_local_partition(&topic_clone.name,
                 partition_zero,
                 &self_address,
@@ -144,10 +148,7 @@ fn find_nodes_for_topic(
         .enumerate()
         .map(|(index, (_, peer_address))| (peer_address.clone(), index + 1))
         .collect();
-    tracing::info!(
-        "Potential peers except this node, for topic: {:?}",
-        potential_peers
-    );
+    tracing::info!("Potential peers excluding this node: {:?}", potential_peers);
     potential_peers
 }
 

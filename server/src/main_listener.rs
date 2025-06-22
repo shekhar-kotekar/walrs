@@ -35,7 +35,7 @@ impl MainListener {
             _ = async {
                 loop {
                     let (stream, _) = main_tcp_listener.accept().await.unwrap();
-                    tracing::info!("connection accepted from: {:?}", stream.peer_addr());
+                    tracing::debug!("connection accepted from: {:?}", stream.peer_addr());
                     let client_request_cancellation_token = cancellation_token.child_token();
                     let node_manager_tx_clone = self.node_manager_tx.clone();
                     let self_address = self.address.clone();

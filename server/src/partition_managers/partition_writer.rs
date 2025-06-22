@@ -41,10 +41,7 @@ impl PartitionWriter {
         );
 
         let data_file_path = format!("{}/data.log", self.partition_path);
-        tracing::debug!("Partition data will be stored in {}", data_file_path);
-
         let index_file_path = format!("{}/index.log", self.partition_path);
-        tracing::debug!("Partition index will be stored in {}", index_file_path);
 
         let mut data_file = OpenOptions::new()
             .create(true)

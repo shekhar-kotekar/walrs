@@ -51,7 +51,7 @@ async fn main() {
                 .await
             {
                 AdminResponse::TopicInfo { topics } => {
-                    tracing::info!("Topic info retrieved successfully: {:?}", topics);
+                    tracing::info!("Topic info retrieved: {:?}", topics);
                     send_messages(brokers.clone(), &topic.name).await;
                     sleep(std::time::Duration::from_millis(500));
                     read_messages(brokers, &topic.name).await;

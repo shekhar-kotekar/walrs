@@ -202,9 +202,13 @@ impl NodeManager {
     ) {
         let key = format!("{}-{}", topic_name, partition_number);
         tracing::debug!("Getting partition writer for: {}", key);
-
+        tracing::debug!(
+            "Local partition writers: {:?}",
+            self.local_partition_writers.keys()
+        );
+        tracing::debug!("Topic metadata keys: {:?}", self.topic_metadata.keys());
         let response = if let Some(writer) = self.local_partition_writers.get(&key) {
-            let topic_metadata = self.topic_metadata.get(&topic_name).unwrap();
+            let topic_metadata = self.topic_metadata.get(&key).unwrap();
             let partition_info: &PartitionInfo = topic_metadata
                 .partitions
                 .iter()
@@ -235,12 +239,6 @@ impl NodeManager {
         tx: oneshot::Sender<NodeManagerResponse>,
         cancellation_token: CancellationToken,
     ) {
-        tracing::info!(
-            "Creating partition writer. Topic: {}, partition: {}, role: {:?}",
-            topic_name,
-            partition_number,
-            role
-        );
         let key_name = format!("{}-{}", topic_name, partition_number);
         let response: NodeManagerResponse =
             match self.local_partition_writers.entry(key_name.clone()) {

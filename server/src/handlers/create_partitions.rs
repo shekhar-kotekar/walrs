@@ -15,7 +15,7 @@ pub async fn create_local_partition(
     cancellation_token: CancellationToken,
 ) -> Option<mpsc::Sender<PartitionCommand>> {
     tracing::info!(
-        "Creating partition {}, topic: {}, role: {:?}",
+        "Creating local partition {}, topic: {}, role: {:?}",
         partition_number,
         topic_name,
         partition_role
@@ -34,7 +34,7 @@ pub async fn create_local_partition(
     match partition_role {
         PartitionRole::Leader { followers } => {
             tracing::info!(
-                "Leader partition created. Topic: {}, partition: {}, partition followers: {:?}",
+                "Lead partition created. Topic: {}, partition: {}, partition followers: {:?}",
                 topic_name,
                 partition_number,
                 followers
@@ -56,7 +56,7 @@ pub async fn create_local_partition(
         }
         PartitionRole::Follower { leader_address } => {
             tracing::info!(
-                "Created follower partition {} for topic: {}, leader address: {}",
+                "Created follower partition {} for topic: {}, leader: {}",
                 partition_number,
                 topic_name,
                 leader_address
