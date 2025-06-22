@@ -124,6 +124,29 @@ pub async fn create_topic(
     }
 }
 
+// fn update_partition_info_to_topic(
+//     topic: &mut Topic,
+//     self_address: &str,
+//     nodes_in_cluster: &mut HashMap<String, usize>,
+// ) {
+//     nodes_in_cluster.insert(self_address.to_owned(), 0);
+//     // add partition info to topic
+//     for (peer_address, partition_number) in nodes_in_cluster.iter() {
+//         let partition_followers: HashMap<String, usize> = nodes_in_cluster
+//             .iter()
+//             .filter(|(address, _)| *address != peer_address)
+//             .map(|(address, index)| (address.clone(), *index))
+//             .collect();
+//         let partition_info = PartitionInfo {
+//             number: *partition_number as u8,
+//             leader_address: peer_address.clone(),
+//             follower_addresses: partition_followers.keys().cloned().collect(),
+//         };
+//         tracing::info!("Added partition info: {:?}", &partition_info);
+//         topic.add_partition(partition_info);
+//     }
+// }
+
 fn find_nodes_for_topic(
     self_address: &String,
     num_partitions: u8,
@@ -134,6 +157,7 @@ fn find_nodes_for_topic(
     // we will use this to distribute partitions across peers
 
     // sort peers by number of registered topics in descending order
+    // node on which topic is being created will be excluded from the list because it will be the leader for partition 0
     let mut peers_sorted_by_number_of_topics: Vec<(usize, String)> = cluster_info
         .nodes
         .iter()
@@ -142,12 +166,14 @@ fn find_nodes_for_topic(
         .collect();
     peers_sorted_by_number_of_topics.sort_by_key(|&(topic_count, _)| topic_count);
 
+    // key: peer address, value: partition number for which peer is a leader
     let potential_peers: HashMap<String, usize> = peers_sorted_by_number_of_topics
         .iter()
         .take(num_partitions as usize)
         .enumerate()
         .map(|(index, (_, peer_address))| (peer_address.clone(), index + 1))
         .collect();
+
     tracing::info!("Potential peers excluding this node: {:?}", potential_peers);
     potential_peers
 }

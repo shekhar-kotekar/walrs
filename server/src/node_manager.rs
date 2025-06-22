@@ -1,6 +1,6 @@
 use std::collections::{HashMap, hash_map::Entry};
 
-use commons::models::{NodeInfo, PartitionInfo, PartitionRole, Topic, TopicStatus};
+use commons::models::{NodeInfo, PartitionRole, Topic, TopicStatus};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -206,19 +206,7 @@ impl NodeManager {
             "Local partition writers: {:?}",
             self.local_partition_writers.keys()
         );
-        tracing::debug!("Topic metadata keys: {:?}", self.topic_metadata.keys());
         let response = if let Some(writer) = self.local_partition_writers.get(&key) {
-            let topic_metadata = self.topic_metadata.get(&key).unwrap();
-            let partition_info: &PartitionInfo = topic_metadata
-                .partitions
-                .iter()
-                .find(|partition| partition.leader_address == self.node_config.address)
-                .unwrap();
-            assert_eq!(
-                partition_info.number, partition_number,
-                "Partition number mismatch for topic: {}",
-                topic_name
-            );
             NodeManagerResponse::PartitionWriter {
                 writer: writer.clone(),
             }
