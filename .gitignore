@@ -5,3 +5,5 @@
 .zed/
 *.log
 .DS_Store
+
+server/k8s/temp/*
