@@ -4,3 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+commons = { path = "../commons" }
+bytes = "1.10.1"
+clap = { version = "4.5.40", features = ["derive"] }
+ctrlc = "3.4.7"
+tokio = "1.45.1"
+rustyline = "16.0.0"
+tracing = "0.1.41"

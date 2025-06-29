@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: walrs-srvr
+  namespace: walrs
+  labels:
+    app: walrs-srvr
+spec:
+  serviceName: walrs-headless-service
+  replicas: 3
+  selector:
+    matchLabels:
+      app: walrs-srvr
+  template:
+    metadata:
+      labels:
+        app: walrs-srvr
+    spec:
+      containers:
+        - name: walrs-server
+          image: localhost:5001/walrs:5dfedf9
+          ports:
+            - containerPort: 5056
+              name: walrs-srvr-svc
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "250m"
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: REPLICA_COUNT
+              value: "3"
+            - name: POD_NAME_PREFIX
+              value: "walrs-srvr"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ubuntu-debug-pod
+  namespace: walrs
+  labels:
+    app: ubuntu-debug
+spec:
+  containers:
+    - image: ubuntu:latest
+      command:
+        - "sleep"
+        - "3600"
+      imagePullPolicy: IfNotPresent
+      name: ubuntu-debug
+      resources:
+        requests:
+          memory: "32Mi"
+          cpu: "250m"
+        limits:
+          memory: "128Mi"
+          cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: walrs-headless-service
+  namespace: walrs
+spec:
+  clusterIP: None
+  ports:
+    - name: tcp
+      protocol: TCP
+      port: 5056
+      targetPort: walrs-srvr-svc
+  selector:
+    app: walrs-srvr

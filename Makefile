@@ -1,47 +1,30 @@
-export CONFIG_FILE_PATH := config.toml
-
-export PROJECT_NAME := walrs
 k8s_context := kind-kind
 IMAGE_REGISTRY := localhost:5001
+export PROJECT_NAME := walrs
 export GIT_COMMIT := $(shell git rev-parse --short HEAD)
-
-.PHONY: run_server set_kind_context dockerize deploy teardown replace_environment_variables dev-setup
-
-run_server:
-	RUSTFLAGS='--cfg tokio_unstable' cargo run --bin walrs_server
-
-prepare:
-	@if [ -z "$(PACKAGE)" ]; then \
-        echo "Error: PACKAGE variable is not set"; \
-        exit 1; \
-    fi
-	@echo "Preparing $(PACKAGE) package"
-	cargo fmt && cargo clippy && cargo check
-
-test: prepare
-	@echo
-	@echo "Running tests for $(PACKAGE) package and the tests with #[traced_test] attribute"
-	RUST_LOG=info cargo test --package $(PACKAGE) -- --nocapture
 
 set_kind_context:
 	kubectl config use-context ${k8s_context}
 	@echo "INFO: k8s context set to ${k8s_context}"
 	@echo
 
-build_image:
-	@echo "INFO: Building docker image."
-	# --progress=plain
-	docker build --tag ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT} -f ./server/Dockerfile .
-	@echo "INFO: docker image built successfully!"
+build:
+	# --progress plain \
+	# --platform linux/amd64,linux/arm64 -t walrs_server:latest .
+	@echo "DEBUG: GIT_COMMIT = ${GIT_COMMIT}"
+	@docker buildx build --platform linux/arm64 -t ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT} .
+	@docker images
 
-push_image: set_kind_context build_image
+push_image: set_kind_context build
 	docker push ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT}
 
-replace_environment_variables:
+replace_environment_variables: set_kind_context
 	@echo "INFO: Replacing environment variables in k8s deployment file"
 	@echo "DEBUG: git_commit = $(GIT_COMMIT)"
 
-	@mkdir -p ./server/k8s/${GIT_COMMIT}
+	@mkdir -p ./server/k8s/temp/${GIT_COMMIT}
+
+	@ls -ltrha ./server/k8s/temp/
 
 	@sed -e 's/\$${GIT_COMMIT}/$(GIT_COMMIT)/' \
 		 -e 's/\$${PROJECT_NAME}/$(PROJECT_NAME)/' < ./server/k8s/prerequisites.yml > ./server/k8s/temp/${GIT_COMMIT}/prerequisites.yml
@@ -51,13 +34,15 @@ replace_environment_variables:
 
 	@echo "INFO: Environment variables replaced successfully!"
 
-deploy:
+deploy: set_kind_context
+	@kubectl delete statefulsets.apps walrs-srvr -n walrs || true
 	@if [ "$(FAST)" = "true" ]; then \
         echo "INFO: Fast mode enabled. Skipping build_image and push_image."; \
         $(MAKE) replace_environment_variables; \
     else \
         $(MAKE) push_image replace_environment_variables; \
     fi
+
 	@echo "INFO: Deploying to ${k8s_context} k8s cluster\n"
 	kubectl apply -f ./server/k8s/temp/${GIT_COMMIT}/prerequisites.yml
 	kubectl apply -f ./server/k8s/temp/${GIT_COMMIT}/server.yml
@@ -83,3 +68,10 @@ teardown: set_kind_context
 dev-setup:
 	@bash ./scripts/dev-setup.sh
 	@cargo install --locked tokio-console
+
+run_single_server: build
+	docker run --rm -it -p 8080:8080 ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT}
+
+run_client:
+	@cargo build -p cli
+	@./target/debug/cli

@@ -1,13 +1,16 @@
-use commons::models::Message;
+use std::io::{Error, ErrorKind};
+
+use commons::models::{Message, PartitionInfo, PartitionRole, PeerCommand, PeerResponse};
 use tokio::fs::File;
 use tokio::io::AsyncSeekExt;
 use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 
 use crate::models::PartitionCommand;
 use crate::models::PartitionWriterResponse;
-use crate::partition_managers::models::{INDEX_ENTRY_SIZE, RecordIndex};
+use crate::partition_managers::models::{RecordIndex, INDEX_ENTRY_SIZE};
 
 pub struct PartitionWriter {
     partition_name: String,
@@ -16,7 +19,7 @@ pub struct PartitionWriter {
 }
 
 impl PartitionWriter {
-    pub fn new(topic: &String, partition_number: u8, base_path: &String) -> Self {
+    pub fn new(topic: &str, partition_number: u8, base_path: &String) -> Self {
         let partition_name = format!("{}-p{}", topic, partition_number);
         let partition_path = format!("{}/{}/p{}", base_path, topic, partition_number);
         std::fs::create_dir_all(&partition_path)
@@ -95,9 +98,7 @@ impl PartitionWriter {
                                 );
                             });
                         }
-                        _ => {
-                            tracing::error!("Unknown partition command received: {:?}", command);
-                        }
+                        other => tracing::error!("Invalid partition command received: {:?}", other)
                     }
                 }
                 _ = self.flush_interval.tick() => {
@@ -177,4 +178,107 @@ impl PartitionWriter {
         index_file.write_all(&index_entry_buffer).await?;
         Ok(())
     }
+}
+
+pub async fn create_remote_leader_partition(
+    topic_name: String,
+    partition_info: PartitionInfo,
+) -> PeerResponse {
+    tracing::info!(
+        "Creating partition {} for topic {}",
+        partition_info.number,
+        topic_name
+    );
+    let command: PeerCommand = PeerCommand::CreatePartition {
+        topic_name: topic_name.to_string(),
+        partition_number: partition_info.number,
+        role: PartitionRole::Leader {
+            followers: partition_info.followers.clone(),
+        },
+    };
+    commons::send_and_receive_peer_command(command, &partition_info.leader_address).await
+}
+
+pub async fn create_local_leader_partition(
+    topic_name: String,
+    partition_info: PartitionInfo,
+    data_dir_path: String,
+    cancellation_token: CancellationToken,
+) -> Result<mpsc::Sender<PartitionCommand>, Error> {
+    tracing::info!(
+        "Creating local leader partition {} for topic {}",
+        partition_info.number,
+        topic_name
+    );
+    let mut local_partition: PartitionWriter =
+        PartitionWriter::new(&topic_name, partition_info.number, &data_dir_path);
+
+    let (partition_tx, partition_rx) = mpsc::channel::<PartitionCommand>(100);
+    tokio::spawn(async move {
+        local_partition
+            .start(partition_rx, cancellation_token)
+            .await;
+    });
+    tracing::debug!(
+        "Local partition writer started for topic {} and partition {}",
+        topic_name,
+        partition_info.number
+    );
+
+    let mut join_set: JoinSet<PeerResponse> = JoinSet::new();
+
+    partition_info.followers.iter().for_each(|follower| {
+        let follower_address = follower.clone();
+        let topic_name = topic_name.clone();
+        let partition_number = partition_info.number;
+        let role = PartitionRole::Follower {
+            leader_address: partition_info.leader_address.clone(),
+        };
+        join_set.spawn(async move {
+            let command: PeerCommand = PeerCommand::CreatePartition {
+                topic_name: topic_name.to_string(),
+                partition_number,
+                role,
+            };
+            tracing::debug!(
+                "Sending request to create a follower partition to {}",
+                follower_address,
+            );
+            commons::send_and_receive_peer_command(command, &follower_address).await
+        });
+    });
+    while let Some(result) = join_set.join_next().await {
+        match result {
+            Ok(peer_response) => match peer_response {
+                PeerResponse::PartitionCreated {
+                    topic_name,
+                    partition_number,
+                } => {
+                    tracing::info!(
+                        "Follower partition {} created for topic {} on remote peer",
+                        partition_number,
+                        topic_name
+                    );
+                }
+                other => {
+                    return Err(std::io::Error::new(
+                        ErrorKind::Other,
+                        format!("Unexpected response: {:?}", other),
+                    ));
+                }
+            },
+            Err(join_error) => {
+                return Err(std::io::Error::new(
+                    ErrorKind::Other,
+                    format!("Follower partition creation failed: {}", join_error),
+                ));
+            }
+        }
+    }
+    tracing::info!(
+        "partition {} created for: {}",
+        partition_info.number,
+        topic_name
+    );
+    Ok(partition_tx)
 }

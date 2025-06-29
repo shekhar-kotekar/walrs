@@ -1,5 +1,0 @@
-address: "127.0.0.1:5076"
-heartbeat_interval_ms: 27000
-mpsc_queue_size: 100
-base_path_for_data: "/tmp/walrs/data"
-peers: ["127.0.0.1:5075", "127.0.0.1:5077"]

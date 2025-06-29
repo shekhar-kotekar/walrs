@@ -1,5 +1,4 @@
-pub mod admin;
-pub mod create_partitions;
-pub mod create_topic;
+pub mod consumer;
 pub mod heartbeat;
+pub mod peer;
 pub mod producer;

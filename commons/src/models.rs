@@ -1,175 +1,12 @@
-use std::{
-    collections::HashMap,
-    io::{Error, ErrorKind},
-};
+use std::{collections::HashMap, str::FromStr};
 
 use bincode::{Decode, Encode};
 
-#[derive(Clone, Debug, Encode, Decode, PartialEq)]
-pub struct Message {
-    //TODO: Make these fields private so that
-    // they can only be accessed through the constructor and we can validate each field
-    pub payload: Vec<u8>,
-    pub key: Option<String>,
-    pub headers: HashMap<String, String>,
-}
-
-impl Message {
-    pub const PAYLOAD_MAX_SIZE: usize = 1024 * 1024; // 1 MB
-    pub const HEADERS_MAX_COUNT: usize = 10;
-    pub const HEADER_KEY_MAX_LENGTH: usize = 50;
-    pub const HEADER_VALUE_MAX_LENGTH: usize = 100;
-    pub const KEY_MAX_LENGTH: usize = 50;
-
-    pub fn new(
-        payload: Vec<u8>,
-        key: Option<String>,
-        headers: HashMap<String, String>,
-    ) -> Result<Self, Error> {
-        Self::validate_message(&payload, &key, &headers)?;
-        Ok(Self {
-            payload,
-            key,
-            headers,
-        })
-    }
-
-    fn validate_message(
-        payload: &[u8],
-        key: &Option<String>,
-        headers: &HashMap<String, String>,
-    ) -> Result<(), Error> {
-        if payload.is_empty() || payload.len() > Self::PAYLOAD_MAX_SIZE {
-            return Err(Error::new(ErrorKind::InvalidInput, "Invalid payload size"));
-        }
-        if headers.len() > Self::HEADERS_MAX_COUNT {
-            return Err(Error::new(ErrorKind::InvalidInput, "Too many headers"));
-        }
-        for (header_key, header_value) in headers {
-            if header_key.is_empty() || header_key.len() > Self::HEADER_KEY_MAX_LENGTH {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "Invalid header key length",
-                ));
-            }
-            if header_value.is_empty() || header_value.len() > Self::HEADER_VALUE_MAX_LENGTH {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "Invalid header value length",
-                ));
-            }
-        }
-        if let Some(k) = key {
-            if k.is_empty() || k.len() > Self::KEY_MAX_LENGTH {
-                return Err(Error::new(ErrorKind::InvalidInput, "Invalid key length"));
-            }
-        }
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, Encode, Decode, PartialEq)]
-pub enum AdminCommand {
-    CreateTopic { topic: Topic },
-    GetTopicInfo { topic_names: Vec<String> },
-}
-
-#[derive(Clone, Debug, Encode, Decode, PartialEq)]
-pub enum ProducerCommand {
-    WriteMessages {
-        topic: String,
-        partition_number: u8,
-        messages: Vec<Message>,
-    },
-}
-
-#[derive(Clone, Debug, Encode, Decode, PartialEq)]
-pub enum ConsumerCommand {
-    FetchMessages { topic: String, offset: Option<u64> },
-}
-
-#[derive(Clone, Debug, Encode, Decode, PartialEq)]
-pub enum WalrsCommand {
-    Peer(PeerCommand),
-    Admin(AdminCommand),
-    Producer(ProducerCommand),
-    Consumer(ConsumerCommand),
-}
-
-#[derive(Clone, Debug, Encode, Decode, PartialEq)]
-pub enum WalrsResponse {
-    Admin(AdminResponse),
-    Producer(ProducerResponse),
-    Consumer(ConsumerResponse),
-    Peer(PeerResponse),
-}
-
-#[derive(Clone, Debug, Encode, Decode, PartialEq)]
-pub enum ConsumerResponse {
-    MessagesFetched { messages: Vec<Message> },
-    Error(String),
-}
-
-#[derive(Clone, Debug, Encode, Decode, PartialEq)]
-pub enum AdminResponse {
-    TopicInfo { topics: Vec<Topic> },
-    Error(String),
-    RequestAccepted,
-}
-
-#[derive(Clone, Debug, Encode, Decode, PartialEq)]
-pub enum ProducerResponse {
-    Error { message: String },
-    MessagesPersisted { count: u8 },
-    RequestAccepted,
-    Redirect { leader_address: String },
-}
-
-#[derive(Clone, Debug, Encode, Decode, PartialEq)]
-pub enum PartitionRole {
-    // key: follower address, value: partition number
-    Leader { followers: HashMap<String, usize> },
-    Follower { leader_address: String },
-}
-
-#[derive(Clone, Debug, Encode, Decode, PartialEq)]
-pub enum PeerCommand {
-    CreatePartitionWriter {
-        topic_name: String,
-        partition_number: u8,
-        role: PartitionRole,
-    },
-    Heartbeat {
-        node_info: NodeInfo,
-    },
-    SyncMessages {
-        topic_name: String,
-        partition_number: u8,
-        messages: Vec<Message>,
-    },
-}
-
-#[derive(Clone, Debug, Encode, Decode, PartialEq)]
-pub enum PeerResponse {
-    PartitionWriterCreated,
-    HeartbeatAcknowledged,
-    Error { message: String },
-    MessagesSynced { count: u8 },
-}
-
-#[derive(Clone, Debug, Encode, Decode, PartialEq)]
-pub struct NodeInfo {
-    pub registed_topics: Vec<String>,
-    pub address: String,
-}
-
-impl NodeInfo {
-    pub fn new(address: String) -> Self {
-        Self {
-            registed_topics: Vec::new(),
-            address,
-        }
-    }
+#[derive(Debug, Clone, Encode, Decode, PartialEq)]
+pub struct PartitionInfo {
+    pub number: u8,
+    pub leader_address: String,
+    pub followers: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Encode, Decode)]
@@ -185,16 +22,32 @@ pub enum AckLevel {
     All,
 }
 
+impl FromStr for AckLevel {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            // "none" | "0" => Ok(AckLevel::None),
+            "leader" | "1" => Ok(AckLevel::Leader),
+            "all" | "-1" => Ok(AckLevel::All),
+            _ => Err(format!(
+                "Invalid ack level: '{}'. Valid options: none, leader, all",
+                s
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Encode, Decode, PartialEq)]
 pub enum TopicStatus {
     ReadyToServe,
     CreationInProgress,
+    NotReady,
 }
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq)]
 pub struct Topic {
     pub name: String,
-    pub num_partitions: u8,
     pub replication_factor: u8,
     pub retention_period_minutes: u16,
     pub ack_level: AckLevel,
@@ -203,7 +56,7 @@ pub struct Topic {
 }
 
 impl Topic {
-    const DEFAULT_NUM_PARTITIONS: u8 = 3;
+    pub const DEFAULT_NUM_PARTITIONS: u8 = 3;
     const DEFAULT_REPLICATION_FACTOR: u8 = 3;
     const DEFAULT_RETENTION_PERIOD_MINUTES: u16 = 60;
 
@@ -213,116 +66,154 @@ impl Topic {
         replication_factor: Option<u8>,
         retention_period_minutes: Option<u16>,
         ack_level: Option<AckLevel>,
-    ) -> Result<Self, String> {
-        let new_topic = Self {
+    ) -> Result<Self, std::io::Error> {
+        let num_partitions = num_partitions.unwrap_or(Self::DEFAULT_NUM_PARTITIONS);
+        let replication_factor = replication_factor.unwrap_or(Self::DEFAULT_REPLICATION_FACTOR);
+        let retention_period_minutes =
+            retention_period_minutes.unwrap_or(Self::DEFAULT_RETENTION_PERIOD_MINUTES);
+        let ack_level = ack_level.unwrap_or(AckLevel::Leader);
+
+        Ok(Topic {
             name,
-            num_partitions: num_partitions.unwrap_or(Self::DEFAULT_NUM_PARTITIONS),
-            replication_factor: replication_factor.unwrap_or(Self::DEFAULT_REPLICATION_FACTOR),
-            retention_period_minutes: retention_period_minutes
-                .unwrap_or(Self::DEFAULT_RETENTION_PERIOD_MINUTES),
-            ack_level: ack_level.unwrap_or(AckLevel::Leader),
-            partitions: Vec::new(),
-            status: TopicStatus::CreationInProgress,
-        };
-        new_topic.check_constraints().unwrap();
-        Ok(new_topic)
-    }
-
-    pub fn add_partition(&mut self, partition: PartitionInfo) {
-        self.partitions.push(partition);
-    }
-
-    pub fn add_partitions(&mut self, partitions: Vec<PartitionInfo>) {
-        self.partitions.extend(partitions);
-    }
-
-    fn check_constraints(&self) -> Result<(), String> {
-        if self.num_partitions < 1 {
-            return Err("Number of partitions must be at least 1".to_string());
-        }
-        if self.replication_factor < 1 {
-            return Err("Replication factor must be greater than 0".to_string());
-        }
-        if self.retention_period_minutes == 0 {
-            return Err("Retention period must be greater than 0".to_string());
-        }
-        if self.name.is_empty() {
-            return Err("Topic name cannot be empty".to_string());
-        }
-        if self.name.len() > 25 {
-            return Err("Topic name cannot exceed 25 characters".to_string());
-        }
-        Ok(())
+            replication_factor,
+            retention_period_minutes,
+            ack_level,
+            partitions: Vec::with_capacity(num_partitions as usize),
+            status: TopicStatus::NotReady,
+        })
     }
 }
 
-#[derive(Debug, Clone, Encode, Decode, PartialEq)]
-pub struct PartitionInfo {
-    pub number: u8,
-    pub leader_address: String,
-    pub follower_addresses: Vec<String>,
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub enum AdminCommand {
+    CreateTopic {
+        name: String,
+        num_partitions: Option<u8>,
+        replication_factor: Option<u8>,
+        retention_period_minutes: Option<u16>,
+        ack_level: Option<AckLevel>,
+    },
+    GetTopicInfo {
+        topic_names: Vec<String>,
+    },
 }
 
-#[cfg(test)]
-mod tests {
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub enum AdminResponse {
+    TopicInfo { topics: Vec<Topic> },
+    Error(String),
+    RequestAccepted,
+}
 
-    use super::*;
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub enum WalrsCommand {
+    Admin(AdminCommand),
+    Peer(PeerCommand),
+    Producer(ProducerCommand),
+    Consumer(ConsumerCommand),
+}
 
-    #[test]
-    fn test_message_serialization() {
-        let message = Message {
-            payload: vec![1, 2, 3],
-            key: Some("key".into()),
-            headers: HashMap::new(),
-        };
-        let serialized_message =
-            bincode::encode_to_vec(&message, bincode::config::standard()).unwrap();
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub enum ConsumerCommand {
+    FetchMessages {
+        topic: String,
+        partition_number: u8,
+        offset: Option<u64>,
+    },
+}
 
-        let (deserialized_message, decoded_length): (Message, usize) =
-            bincode::decode_from_slice(&serialized_message, bincode::config::standard()).unwrap();
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub enum ProducerCommand {
+    WriteMessages {
+        topic: String,
+        partition_number: u8,
+        messages: Vec<Message>,
+    },
+}
 
-        assert_eq!(message, deserialized_message);
-        assert_eq!(serialized_message.len(), decoded_length);
-        assert_eq!(decoded_length, serialized_message.len());
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub enum WalrsResponse {
+    Admin(AdminResponse),
+    Peer(PeerResponse),
+    Producer(ProducerResponse),
+    Consumer(ConsumerResponse),
+}
+
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub enum ProducerResponse {
+    Error { message: String },
+    MessagesPersisted { count: u8 },
+    RequestAccepted,
+    Redirect { leader_address: String },
+}
+
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub enum ConsumerResponse {
+    MessagesFetched { messages: Vec<Message> },
+    Error(String),
+}
+
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub enum PartitionRole {
+    // key: follower address, value: partition number
+    Leader { followers: Vec<String> },
+    Follower { leader_address: String },
+}
+
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub struct BrokerInfo {
+    pub registered_topics: HashMap<String, (Topic, TopicStatus)>,
+    pub address: String,
+}
+
+impl BrokerInfo {
+    pub fn new(address: String) -> Self {
+        Self {
+            registered_topics: HashMap::new(),
+            address,
+        }
     }
+}
 
-    #[test]
-    fn test_command_serialization() {
-        let topic_to_create = Topic::new(
-            "test_topic".into(),
-            None,
-            None,
-            Some(60000),
-            Some(AckLevel::Leader),
-        );
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub enum PeerCommand {
+    CreatePartition {
+        topic_name: String,
+        partition_number: u8,
+        role: PartitionRole,
+    },
+    Heartbeat {
+        broker_info: BrokerInfo,
+    },
+    SyncMessages {
+        topic_name: String,
+        partition_number: u8,
+        messages: Vec<Message>,
+    },
+}
 
-        let command = WalrsCommand::Admin(AdminCommand::CreateTopic {
-            topic: topic_to_create.unwrap(),
-        });
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub enum PeerResponse {
+    PartitionCreated {
+        topic_name: String,
+        partition_number: u8,
+    },
+    Error {
+        message: String,
+    },
+    MessagesSynced {
+        topic_name: String,
+        partition_number: u8,
+        count: u8,
+    },
+    HeartbeatAcknowledged,
+}
 
-        let serialized_command =
-            bincode::encode_to_vec(&command, bincode::config::standard()).unwrap();
-
-        let (deserialized_command, decoded_length): (WalrsCommand, usize) =
-            bincode::decode_from_slice(&serialized_command, bincode::config::standard()).unwrap();
-
-        assert_eq!(command, deserialized_command);
-        assert_eq!(serialized_command.len(), decoded_length);
-        assert_eq!(decoded_length, serialized_command.len());
-
-        // if let WalrsCommand::Admin(AdminCommand::CreateTopic {
-        //     name,
-        //     num_partitions,
-        //     replication_factor,
-        //     retention_period_minutes: retention_period_ms,
-        // }) = deserialized_command
-        // {
-        //     assert_eq!(name, "test_topic");
-        //     assert_eq!(num_partitions, 3);
-        //     assert_eq!(replication_factor, 2);
-        //     assert_eq!(retention_period_ms, Some(60000));
-        // } else {
-        //     panic!("Deserialized command is not of type AdminCommand::CreateTopic");
-        // }
-    }
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+pub struct Message {
+    //TODO: Make these fields private so that
+    // they can only be accessed through the constructor and we can validate each field
+    pub payload: Vec<u8>,
+    pub key: Option<String>,
+    pub headers: HashMap<String, String>,
 }

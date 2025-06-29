@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     models::{PartitionCommand, PartitionReaderResponse},
-    partition_managers::models::{INDEX_ENTRY_SIZE, RecordIndex},
+    partition_managers::models::{RecordIndex, INDEX_ENTRY_SIZE},
 };
 
 pub struct PartitionReader {

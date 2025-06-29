@@ -29,39 +29,25 @@ In this process we are aiming to learn distributed systems, some algorithms, per
 
 Execute `make dev-setup` target which will install necessary tools like tokio-console, etc.
 
-### Run in local
+## Run in kind
 
-In one console execute below to run one walrs server in local
-
-```
-export POD_IP=127.0.0.1
-export BROKER_CONFIG_FILE=./server/configs/<broker_number_conf>.yml
-make run_server
-```
-
-Open another console and execute `cargo run -p client` to run test client which does following:
-
-1. Connect to locally running walrs server
-2. Try to create a new topic
-3. Send 2 dummy messages
-4. Receive first batch of messages from the walrs server
-
-(Optional) If you want to view Tokio task details then in another console execute `tokio-console` command.
-
-### Deployment in local k8s
-
-Execute `make deploy` to deploy server in local kind cluster.
-
-Execute `make deploy FAST=true` to deploy server in local kind cluster without building Docker image.
-
-Execute `kubectl exec -it ubuntu-debug-pod --namespace walrs -- /bin/bash` to connect to debug pod.
-
-Execute below commands inside debug pod to check if dig command is working or not.
+1. Execute `make deploy` command which will build Docker image for server and deploy a stateful set in local kind cluster.
+2. Exeecute `kubectl port-forward walrs-srvr-0 8080:5056 -n walrs` so that we can send a curl request to it. Keep this terminal open.
+3. In another terminal execute `cargo run -p cli`. This will start a CLI application to which we can send various commands.
+4. To create a topic, give following commands in cli
 
 ```
-apt-get update
-apt-get install dnsutils
-dig +short +search walrs-headless-service.walrs.svc.cluster.local
+use -b localhost:8080
+
+create-topic -t first-topic -p 3
+
+get-topic-info -t first-topic
+
+send-message -m first-message-for-topic-1 -t first-topic
+
+send-message -m second-message-for-topic-1 -t first-topic
+
+consume -t first-topic -p 0
 ```
 
 ## Unit testing

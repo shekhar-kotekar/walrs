@@ -1,4 +1,4 @@
-    #!/bin/bash
+#!/bin/bash
 
 HOOK_FILE=".git/hooks/pre-commit"
 cat > "$HOOK_FILE" << 'EOF'

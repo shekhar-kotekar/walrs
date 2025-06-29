@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
     hash::{DefaultHasher, Hash, Hasher},
+    io::{Error, ErrorKind},
 };
 
 use crate::{
@@ -31,7 +32,10 @@ impl Producer {
         self.buffer.entry(topic).or_default().extend(messages);
     }
 
-    pub async fn flush(&mut self) -> Result<ProducerResponse, std::io::Error> {
+    pub async fn flush(
+        &mut self,
+        debug_mode_server_map: HashMap<String, String>,
+    ) -> Result<ProducerResponse, std::io::Error> {
         if self.buffer.is_empty() {
             tracing::warn!("Producer buffer is empty, nothing to flush.");
             Ok(ProducerResponse::Error {
@@ -46,21 +50,26 @@ impl Producer {
                 self.map_messages_to_nodes(&topic_info);
 
             let mut total_message_persisted = 0;
+
             for (node_address, (topic_name, partition_number, messages)) in mapped_messages {
+                let mapped_address = if debug_mode_server_map.contains_key(&node_address) {
+                    // In debug mode, map the broker address to the local server address
+                    debug_mode_server_map.get(&node_address).unwrap()
+                } else {
+                    tracing::debug!("Using broker address: {}", node_address);
+                    &node_address
+                };
                 let result = self
-                    .send_messages_to_node(&node_address, &topic_name, partition_number, messages)
+                    .send_messages_to_node(mapped_address, &topic_name, partition_number, messages)
                     .await;
                 match result {
                     ProducerResponse::MessagesPersisted { count } => {
                         total_message_persisted += count;
                     }
                     other => {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            format!(
-                                "Failed to send messages to node {}: {:?}",
-                                node_address, other
-                            ),
+                        return Err(Error::new(
+                            ErrorKind::Other,
+                            format!("Failed to send messages to {}: {:?}", node_address, other),
                         ));
                     }
                 }
@@ -236,17 +245,17 @@ mod should {
             PartitionInfo {
                 number: 0,
                 leader_address: "127.0.0.1:5075".into(),
-                follower_addresses: vec!["127.0.0.1:5076".into(), "127.0.0.1:5077".into()],
+                followers: vec!["127.0.0.1:5076".into(), "127.0.0.1:5077".into()],
             },
             PartitionInfo {
                 number: 1,
                 leader_address: "127.0.0.1:5076".into(),
-                follower_addresses: vec!["127.0.0.1:5075".into(), "127.0.0.1:5077".into()],
+                followers: vec!["127.0.0.1:5075".into(), "127.0.0.1:5077".into()],
             },
             PartitionInfo {
                 number: 2,
                 leader_address: "127.0.0.1:5077".into(),
-                follower_addresses: vec!["127.0.0.1:5076".into(), "127.0.0.1:5075".into()],
+                followers: vec!["127.0.0.1:5076".into(), "127.0.0.1:5075".into()],
             },
         ];
         let mut second_topic_info =
@@ -255,17 +264,17 @@ mod should {
             PartitionInfo {
                 number: 2,
                 leader_address: "127.0.0.1:5075".into(),
-                follower_addresses: vec!["127.0.0.1:5076".into(), "127.0.0.1:5077".into()],
+                followers: vec!["127.0.0.1:5076".into(), "127.0.0.1:5077".into()],
             },
             PartitionInfo {
                 number: 1,
                 leader_address: "127.0.0.1:5076".into(),
-                follower_addresses: vec!["127.0.0.1:5075".into(), "127.0.0.1:5077".into()],
+                followers: vec!["127.0.0.1:5075".into(), "127.0.0.1:5077".into()],
             },
             PartitionInfo {
                 number: 0,
                 leader_address: "127.0.0.1:5077".into(),
-                follower_addresses: vec!["127.0.0.1:5076".into(), "127.0.0.1:5075".into()],
+                followers: vec!["127.0.0.1:5076".into(), "127.0.0.1:5075".into()],
             },
         ];
         let topic_info: HashMap<String, Topic> = vec![

@@ -1,12 +1,12 @@
 [package]
 name = "server"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 commons = { path = "../commons" }
 console-subscriber = "0.4.1"
-tokio = { version = "1.45.1", features = ["full"] }
+tokio = { version = "1.45.1", features = ["full", "signal"] }
 tokio-util = { version = "0.7.15", features = ["codec", "rt"] }
 tracing = "0.1.41"
 tracing-appender = "0.2.3"
@@ -14,14 +14,13 @@ tracing-subscriber = "0.3.19"
 bincode = "2.0.1"
 bytes = { version = "1.10.1", features = ["serde"] }
 chrono = "0.4.41"
-serde_yml = "0.0.12"
-serde = "1.0.219"
 
 [dev-dependencies]
 tracing-test = "0.2.5"
 
 [profile.release]
+opt-level = "z"
 lto = true
+codegen-units = 1
 panic = "abort"
 strip = true
-codegen-units = 1

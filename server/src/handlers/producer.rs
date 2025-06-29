@@ -1,19 +1,23 @@
 use std::io::{Error, ErrorKind};
 
 use commons::models::{
-    Message, PartitionInfo, PeerCommand, ProducerCommand, ProducerResponse, Topic,
+    Message, PartitionInfo, PeerCommand, PeerResponse, ProducerCommand, ProducerResponse, Topic,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinSet,
+};
 
 use crate::{
+    broker::{BrokerCommand, BrokerResponse},
     models::{PartitionCommand, PartitionWriterResponse},
-    node_manager::{NodeManagerCommand, NodeManagerResponse},
+    TASK_TIMEOUT_SECONDS,
 };
 
 pub async fn handle_producer_request(
     command: ProducerCommand,
     node_address: &str,
-    node_manager_tx: mpsc::Sender<NodeManagerCommand>,
+    node_manager_tx: mpsc::Sender<BrokerCommand>,
 ) -> ProducerResponse {
     match command {
         ProducerCommand::WriteMessages {
@@ -27,7 +31,7 @@ pub async fn handle_producer_request(
             // it should return redirect response with the correct leader address.
             tracing::info!("Writing {} messages for: {}", messages.len(), topic);
             let (writer, topic_info) =
-                match get_info_from_node_manager(&topic, partition_number, node_manager_tx).await {
+                match get_info_from_broker(&topic, partition_number, node_manager_tx).await {
                     Ok((writer, topic_info)) => (writer, topic_info),
                     Err(err) => {
                         return ProducerResponse::Error {
@@ -36,12 +40,12 @@ pub async fn handle_producer_request(
                     }
                 };
             tracing::debug!(
-                "Information retrieved from node manager: topic: {}, partition: {}",
+                "Information retrieved from broker: topic: {}, partition: {}",
                 topic,
                 partition_number
             );
 
-            if topic_info.num_partitions <= partition_number {
+            if topic_info.partitions.len() <= partition_number as usize {
                 return ProducerResponse::Error {
                     message: format!(
                         "Partition number {} is out of bounds for topic '{}'",
@@ -60,43 +64,101 @@ pub async fn handle_producer_request(
             // TODO: For time being we will compulsorily write messages to local partition writer AND
             // also to followers. In the future we will use ack_level to determine
             // if we need to write messages to followers or not.
+            let message_count = messages.len();
             match write_messages_to_local(&writer, messages.clone()).await {
                 PartitionWriterResponse::MessagesPersisted { count } => {
                     tracing::info!(
-                        "Successfully persisted {} messages for topic: {}, partition: {}",
+                        "Persisted {} messages in local for topic: {}, partition: {}",
                         count,
                         topic,
                         partition_number
                     );
                     // Now send messages to followers
-                    let mut send_follower_tasks = Vec::new();
-                    // spawn a TOKIO task to send messages to each follower
-                    for follower_address in partition_info.follower_addresses.iter() {
-                        let follower_address = follower_address.clone();
+
+                    let mut task_join_set: JoinSet<PeerResponse> = JoinSet::new();
+
+                    partition_info.followers.iter().for_each(|follower| {
+                        let follower_address = follower.clone();
                         let topic = topic.clone();
                         let messages = messages.clone();
-                        let task = tokio::spawn(async move {
-                            send_messages_to_follower(
-                                follower_address,
-                                topic,
-                                partition_number,
-                                messages,
+                        task_join_set.spawn(async move {
+                            tracing::debug!("Starting a sync to follower: {}", follower_address);
+                            let timeout_duration =
+                                std::time::Duration::from_secs(TASK_TIMEOUT_SECONDS);
+                            let result = tokio::time::timeout(
+                                timeout_duration,
+                                send_messages_to_follower(
+                                    follower_address.clone(),
+                                    topic,
+                                    partition_number,
+                                    messages,
+                                ),
                             )
                             .await;
+
+                            match result {
+                                Ok(response) => response,
+                                Err(e) => PeerResponse::Error {
+                                    message: format!(
+                                        "Error while syncing messages to follower: {}: {}",
+                                        follower_address, e
+                                    ),
+                                },
+                            }
                         });
-                        send_follower_tasks.push(task);
-                    }
-                    // Wait for all follower tasks to complete
-                    for task in send_follower_tasks {
-                        if let Err(err) = task.await {
-                            //TODO: Should we remove the messages from local partition writer if sending to followers fails?
-                            tracing::error!("Failed to send messages to follower: {}", err);
-                            return ProducerResponse::Error {
-                                message: format!("Failed to send messages to followers: {}", err),
-                            };
+                    });
+
+                    let mut synced_peer_count = 0;
+                    let timeout_duration = std::time::Duration::from_secs(TASK_TIMEOUT_SECONDS);
+                    let _ = tokio::time::timeout(timeout_duration, async {
+                        let task_result = task_join_set.join_all().await;
+                        tracing::debug!("Follower sync tasks completed: {:?}", task_result);
+                        for result in task_result {
+                            match result {
+                                PeerResponse::MessagesSynced {
+                                    topic_name: _,
+                                    partition_number: _,
+                                    count,
+                                } => {
+                                    if count == message_count as u8 {
+                                        synced_peer_count += 1;
+                                    } else {
+                                        tracing::warn!(
+                                            "Follower did not sync all messages. Expected: {}, Synced: {}",
+                                            message_count,
+                                            count
+                                        );
+                                    }
+                                }
+                                other => tracing::error!("Follower sent invalid response: {:?}", other)
+                            }
+                        }
+                    })
+                    .await;
+                    if synced_peer_count == partition_info.followers.len() {
+                        tracing::info!(
+                            "Successfully synced messages to all {} followers for topic: {}, partition: {}",
+                            synced_peer_count,
+                            topic,
+                            partition_number
+                        );
+                        ProducerResponse::MessagesPersisted { count }
+                    } else {
+                        tracing::warn!(
+                            "Only synced messages to {} out of {} followers for topic: {}, partition: {}",
+                            synced_peer_count,
+                            partition_info.followers.len(),
+                            topic,
+                            partition_number
+                        );
+                        ProducerResponse::Error {
+                            message: format!(
+                                "Failed to sync messages to all followers. Synced to {} out of {} followers.",
+                                synced_peer_count,
+                                partition_info.followers.len()
+                            )
                         }
                     }
-                    ProducerResponse::MessagesPersisted { count }
                 }
                 PartitionWriterResponse::Error { message } => ProducerResponse::Error {
                     message: format!("Failed to write messages: {}", message),
@@ -111,22 +173,28 @@ async fn send_messages_to_follower(
     topic_name: String,
     partition_number: u8,
     messages: Vec<Message>,
-) {
+) -> PeerResponse {
     let peer_command = PeerCommand::SyncMessages {
-        topic_name,
+        topic_name: topic_name.clone(),
         partition_number,
         messages,
     };
-    commons::send_and_receive_peer_command(peer_command, &follower_address).await;
+    tracing::debug!(
+        "Asking follower {} to sync messages. topic: {}, partition: {}",
+        follower_address,
+        topic_name,
+        partition_number
+    );
+    commons::send_and_receive_peer_command(peer_command, &follower_address).await
 }
 
-async fn get_info_from_node_manager(
+async fn get_info_from_broker(
     topic: &str,
     partition_number: u8,
-    node_manager_tx: mpsc::Sender<NodeManagerCommand>,
+    node_manager_tx: mpsc::Sender<BrokerCommand>,
 ) -> Result<(mpsc::Sender<PartitionCommand>, Topic), std::io::Error> {
-    let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeManagerResponse>();
-    let command = NodeManagerCommand::GetPartitionWriter {
+    let (oneshot_tx, oneshot_rx) = oneshot::channel::<BrokerResponse>();
+    let command = BrokerCommand::GetPartitionWriter {
         topic_name: topic.to_string(),
         partition_number,
         tx: oneshot_tx,
@@ -138,11 +206,11 @@ async fn get_info_from_node_manager(
         ));
     }
     match oneshot_rx.await {
-        Ok(NodeManagerResponse::PartitionWriter { writer }) => {
-            let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeManagerResponse>();
-            let get_topic_info_command = NodeManagerCommand::GetTopicInfo {
+        Ok(BrokerResponse::PartitionWriter { writer }) => {
+            let (oneshot_tx, oneshot_rx) = oneshot::channel::<BrokerResponse>();
+            let get_topic_info_command = BrokerCommand::GetTopicInfo {
                 topic_names: vec![topic.to_string()],
-                tx: oneshot_tx,
+                broker_response_tx: oneshot_tx,
             };
             if let Err(err) = node_manager_tx.send(get_topic_info_command).await {
                 return Err(Error::new(
@@ -154,7 +222,7 @@ async fn get_info_from_node_manager(
                 ));
             }
             match oneshot_rx.await {
-                Ok(NodeManagerResponse::TopicInfo { topics }) => {
+                Ok(BrokerResponse::TopicInfo { topics }) => {
                     if let Some(topic_info) = topics.into_iter().find(|t| t.name == topic) {
                         Ok((writer, topic_info))
                     } else {
@@ -166,21 +234,21 @@ async fn get_info_from_node_manager(
                 }
                 Ok(other) => Err(Error::new(
                     ErrorKind::Other,
-                    format!("Node manager error: {:?}", other),
+                    format!("Broker error: {:?}", other),
                 )),
                 Err(err) => Err(Error::new(
                     ErrorKind::Other,
-                    format!("Failed to receive response from node manager: {}", err),
+                    format!("Failed to receive response from broker: {}", err),
                 )),
             }
         }
         Ok(other) => Err(Error::new(
             ErrorKind::Other,
-            format!("Node manager error: {:?}", other),
+            format!("Broker error: {:?}", other),
         )),
         Err(err) => Err(Error::new(
             ErrorKind::Other,
-            format!("Failed to receive response from node manager: {}", err),
+            format!("Failed to receive response from broker: {}", err),
         )),
     }
 }

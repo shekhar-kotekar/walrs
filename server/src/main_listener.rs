@@ -1,31 +1,29 @@
-use commons::models::{
-    ConsumerCommand, ConsumerResponse, PeerCommand, PeerResponse, WalrsCommand, WalrsResponse,
-};
+use commons::models::{AdminCommand, AdminResponse, WalrsCommand, WalrsResponse};
 use tokio::{
     net::{TcpListener, TcpStream},
     signal::{
         self,
-        unix::{Signal, SignalKind, signal},
+        unix::{signal, Signal, SignalKind},
     },
     sync::{mpsc, oneshot},
 };
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 use crate::{
-    handlers::{admin, producer},
-    models::{PartitionCommand, PartitionReaderResponse},
-    node_manager::{NodeManagerCommand, NodeManagerResponse},
+    broker::{BrokerCommand, BrokerResponse},
+    handlers::{consumer, peer, producer},
 };
 
 pub struct MainListener {
     pub address: String,
-    pub node_manager_tx: mpsc::Sender<NodeManagerCommand>,
+    pub broker_tx: mpsc::Sender<BrokerCommand>,
 }
 
 impl MainListener {
     pub async fn start(&self, task_tracker: TaskTracker, cancellation_token: CancellationToken) {
         tracing::info!("Starting main listener on: {}", self.address);
-        let main_tcp_listener = TcpListener::bind(&self.address).await.unwrap();
+        // let main_tcp_listener = TcpListener::bind(&self.address).await.unwrap();
+        let main_tcp_listener = TcpListener::bind("0.0.0.0:5056").await.unwrap();
         tracing::debug!("Listening on: {}", main_tcp_listener.local_addr().unwrap());
 
         let mut sigterm: Signal =
@@ -35,12 +33,11 @@ impl MainListener {
             _ = async {
                 loop {
                     let (stream, _) = main_tcp_listener.accept().await.unwrap();
-                    tracing::debug!("connection accepted from: {:?}", stream.peer_addr());
                     let client_request_cancellation_token = cancellation_token.child_token();
-                    let node_manager_tx_clone = self.node_manager_tx.clone();
+                    let broker_tx_clone = self.broker_tx.clone();
                     let self_address = self.address.clone();
                     task_tracker.spawn(async move {
-                        MainListener::process_request(stream, self_address, node_manager_tx_clone, client_request_cancellation_token).await;
+                        MainListener::process_request(stream, self_address, broker_tx_clone, client_request_cancellation_token).await;
                     });
                 }
             } => {
@@ -65,13 +62,36 @@ impl MainListener {
                 task_tracker.wait().await;
                 tracing::info!("Task tracker wait is over. All tasks cancelled.");
             }
+            _ = self.terminate_signal() => {
+                tracing::info!("Received termination signal, shutting down server...");
+                cancellation_token.cancel();
+                tracing::info!("Cancellation token cancelled.");
+                task_tracker.close();
+                tracing::info!("Task tracker closed.");
+
+                task_tracker.wait().await;
+                tracing::info!("Task tracker wait is over. All tasks cancelled.");
+            }
         }
+    }
+
+    async fn terminate_signal(&self) -> Result<(), std::io::Error> {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            signal(SignalKind::terminate())?.recv().await;
+        }
+        #[cfg(not(unix))]
+        {
+            std::future::pending::<()>().await;
+        }
+        Ok(())
     }
 
     async fn process_request(
         mut stream: TcpStream,
         self_address: String,
-        node_manager_tx: mpsc::Sender<NodeManagerCommand>,
+        broker_tx: mpsc::Sender<BrokerCommand>,
         cancellation_token: CancellationToken,
     ) {
         tokio::select! {
@@ -83,16 +103,16 @@ impl MainListener {
                     Ok(command) => {
                         let response: WalrsResponse = match command {
                             WalrsCommand::Admin(admin_command) =>{
-                                WalrsResponse::Admin(admin::handle_admin_request(admin_command, node_manager_tx).await)
-                            }
-                            WalrsCommand::Producer(producer_command) => {
-                                WalrsResponse::Producer(producer::handle_producer_request(producer_command, &self_address, node_manager_tx).await)
-                            }
-                            WalrsCommand::Consumer(consumer_command) => {
-                                WalrsResponse::Consumer(handle_consumer_request(consumer_command, node_manager_tx).await)
+                                WalrsResponse::Admin(MainListener::handle_admin_request(admin_command, broker_tx).await)
                             }
                             WalrsCommand::Peer(peer_command) => {
-                                WalrsResponse::Peer(handle_peer_request(peer_command, node_manager_tx).await)
+                                WalrsResponse::Peer(peer::handle_peer_request(peer_command, broker_tx).await)
+                            }
+                            WalrsCommand::Producer(producer_command) => {
+                                WalrsResponse::Producer(producer::handle_producer_request(producer_command, &self_address, broker_tx).await)
+                            }
+                            WalrsCommand::Consumer(consumer_command) => {
+                                WalrsResponse::Consumer(consumer::handle_consumer_request(consumer_command, broker_tx).await)
                             }
                         };
                         tracing::info!("Sending response: {:?}", response);
@@ -109,198 +129,69 @@ impl MainListener {
             }
         }
     }
-}
 
-async fn handle_peer_request(
-    command: PeerCommand,
-    node_manager_tx: mpsc::Sender<NodeManagerCommand>,
-) -> PeerResponse {
-    match command {
-        PeerCommand::SyncMessages {
-            topic_name: _,
-            partition_number: _,
-            messages: _,
-        } => PeerResponse::Error {
-            message: "SyncMessages command is not implemented yet.".to_string(),
-        },
-        PeerCommand::Heartbeat { node_info } => {
-            let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeManagerResponse>();
-            let node_manager_command = NodeManagerCommand::Heartbeat {
-                peer_info: node_info.clone(),
-                tx: oneshot_tx,
-            };
-
-            if let Err(err) = node_manager_tx.send(node_manager_command).await {
-                return PeerResponse::Error {
-                    message: format!("Failed to send heartbeat command to node manager: {}", err),
+    async fn handle_admin_request(
+        command: AdminCommand,
+        broker_tx: mpsc::Sender<BrokerCommand>,
+    ) -> AdminResponse {
+        match command {
+            AdminCommand::CreateTopic {
+                name,
+                num_partitions,
+                replication_factor,
+                retention_period_minutes,
+                ack_level,
+            } => {
+                let (oneshot_tx, oneshot_rx) = oneshot::channel::<BrokerResponse>();
+                let create_topic_command = BrokerCommand::CreateTopic {
+                    name,
+                    num_partitions,
+                    replication_factor,
+                    retention_period_minutes,
+                    ack_level,
+                    broker_response_tx: oneshot_tx,
                 };
-            }
-
-            match oneshot_rx.await {
-                Ok(NodeManagerResponse::HeartbeatAcknowledged) => {
-                    PeerResponse::HeartbeatAcknowledged
+                broker_tx
+                    .send(create_topic_command)
+                    .await
+                    .unwrap_or_else(|err| {
+                        tracing::error!("Failed to send CreateTopic command to broker: {}", err);
+                    });
+                tracing::debug!("Waiting for response from broker for create topic command...");
+                match oneshot_rx.await {
+                    Ok(response) => match response {
+                        BrokerResponse::TopicCreationInProgress(_topic) => {
+                            AdminResponse::RequestAccepted
+                        }
+                        BrokerResponse::TopicInfo { topics } => AdminResponse::TopicInfo { topics },
+                        BrokerResponse::Error(err) => AdminResponse::Error(err),
+                        other => AdminResponse::Error(format!("Unexpected response: {:?}", other)),
+                    },
+                    Err(err) => AdminResponse::Error(err.to_string()),
                 }
-                Ok(other) => PeerResponse::Error {
-                    message: format!("Unexpected response from node manager: {:?}", other),
-                },
-                Err(err) => PeerResponse::Error {
-                    message: format!("Failed to receive response from node manager: {}", err),
-                },
             }
-        }
-        PeerCommand::CreatePartitionWriter {
-            topic_name,
-            partition_number,
-            role,
-        } => {
-            let (oneshot_tx, oneshot_rx) = oneshot::channel::<NodeManagerResponse>();
-            let node_manager_command = NodeManagerCommand::CreatePartitionWriter {
-                topic_name,
-                partition_number,
-                role,
-                tx: oneshot_tx,
-            };
-
-            if let Err(err) = node_manager_tx.send(node_manager_command).await {
-                return PeerResponse::Error {
-                    message: format!(
-                        "Failed to send create partition writer command to node manager: {}",
-                        err
-                    ),
+            AdminCommand::GetTopicInfo { topic_names } => {
+                let (tx, rx) = oneshot::channel::<BrokerResponse>();
+                let command = BrokerCommand::GetTopicInfo {
+                    topic_names,
+                    broker_response_tx: tx,
                 };
-            }
-
-            match oneshot_rx.await {
-                Ok(NodeManagerResponse::PartitionWriterCreated) => {
-                    PeerResponse::PartitionWriterCreated
-                }
-                Ok(NodeManagerResponse::Error { message }) => PeerResponse::Error { message },
-                Ok(other) => PeerResponse::Error {
-                    message: format!("Unexpected response from node manager: {:?}", other),
-                },
-                Err(err) => PeerResponse::Error {
-                    message: format!("Failed to receive response from node manager: {}", err),
-                },
-            }
-        }
-    }
-}
-
-async fn handle_consumer_request(
-    command: ConsumerCommand,
-    node_manager_tx: mpsc::Sender<NodeManagerCommand>,
-) -> ConsumerResponse {
-    tracing::info!("Received consumer command: {:?}", command);
-    match command {
-        ConsumerCommand::FetchMessages { topic, offset: _ } => {
-            let (nm_oneshot_tx, nm_oneshot_rx) = oneshot::channel::<NodeManagerResponse>();
-            let nm_command = NodeManagerCommand::GetPartitionReader {
-                topic_name: topic.clone(),
-                tx: nm_oneshot_tx,
-            };
-            node_manager_tx
-                .send(nm_command)
-                .await
-                .unwrap_or_else(|err| {
-                    tracing::error!("Failed to send command to node manager: {}", err);
+                broker_tx.send(command).await.unwrap_or_else(|err| {
+                    tracing::error!("Failed to send GetTopicInfo command to broker: {}", err);
                 });
-            match nm_oneshot_rx.await {
-                Ok(NodeManagerResponse::PartitionReader { reader }) => {
-                    tracing::info!("Got partition reader for topic.");
-                    let (pr_oneshot_tx, pr_oneshot_rx) =
-                        oneshot::channel::<PartitionReaderResponse>();
-                    let partition_reader_command: PartitionCommand =
-                        PartitionCommand::FetchMessages {
-                            topic_name: topic.clone(),
-                            tx: pr_oneshot_tx,
-                        };
-                    reader
-                        .send(partition_reader_command)
-                        .await
-                        .unwrap_or_else(|err| {
-                            tracing::error!("Failed to send command to partition reader: {}", err);
-                        });
-
-                    match pr_oneshot_rx.await {
-                        Ok(PartitionReaderResponse::MessagesRead { messages }) => {
-                            ConsumerResponse::MessagesFetched { messages }
+                match rx.await {
+                    Ok(response) => match response {
+                        BrokerResponse::TopicInfo { topics } => AdminResponse::TopicInfo { topics },
+                        other => {
+                            AdminResponse::Error(format!("Unexpected response type: {:?}", other))
                         }
-                        Ok(PartitionReaderResponse::InternalError { message }) => {
-                            ConsumerResponse::Error(message)
-                        }
-                        Err(err) => ConsumerResponse::Error(format!(
-                            "Failed to receive response from partition reader: {}",
-                            err
-                        )),
-                    }
+                    },
+                    Err(err) => AdminResponse::Error(format!(
+                        "Failed to receive topic info response: {}",
+                        err
+                    )),
                 }
-                Ok(_) => ConsumerResponse::Error("Unexpected response from node manager".into()),
-                Err(err) => ConsumerResponse::Error(format!(
-                    "Failed to receive response from node manager: {}",
-                    err
-                )),
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod should {
-
-    use commons::models::{AckLevel, AdminCommand, AdminResponse, Topic, WalrsCommand};
-    use tokio::{io::AsyncWriteExt, net::TcpStream};
-    use tracing_test::traced_test;
-
-    use super::*;
-
-    #[tokio::test]
-    // #[ignore]
-    #[traced_test]
-    async fn return_accepted_response_when_a_command_is_sent() {
-        let address: String = "127.0.0.1:8080".into();
-        let (node_manager_tx, _) = mpsc::channel::<NodeManagerCommand>(2);
-        let main_listener: MainListener = MainListener {
-            address: address.clone(),
-            node_manager_tx,
-        };
-
-        let task_tracker = TaskTracker::new();
-        let cancellation_token: CancellationToken = CancellationToken::new();
-        let node_cancellation_token = cancellation_token.child_token();
-        tokio::spawn(async move {
-            main_listener
-                .start(task_tracker, node_cancellation_token)
-                .await;
-        });
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let mut sender_stream = TcpStream::connect(address).await.unwrap();
-
-        let topic: Topic = Topic::new(
-            "test_topic".into(),
-            None,
-            None,
-            Some(60000),
-            Some(AckLevel::Leader),
-        )
-        .unwrap();
-
-        let create_topic_command = WalrsCommand::Admin(AdminCommand::CreateTopic {
-            topic: topic.clone(),
-        });
-        let serialized_command =
-            bincode::encode_to_vec(&create_topic_command, bincode::config::standard()).unwrap();
-        sender_stream.write_all(&serialized_command).await.unwrap();
-
-        let response_from_node: WalrsResponse =
-            commons::read_from_socket::<WalrsResponse>(&mut sender_stream)
-                .await
-                .unwrap();
-
-        assert_eq!(
-            response_from_node,
-            WalrsResponse::Admin(AdminResponse::RequestAccepted)
-        );
-
-        cancellation_token.cancel();
     }
 }
