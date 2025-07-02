@@ -24,6 +24,9 @@ In this process we are aiming to learn distributed systems, some algorithms, per
 - Tokio
 - Docker
 - Kubernetes
+- Make
+- Grafana
+- Prometheus
 
 ## Getting Started
 
@@ -55,14 +58,20 @@ consume -t first-topic -p 0
 ```
 cargo test <MODULE NAME> -- --nocapture
 Example:
-cargo test node_manager -- --nocapture
+cargo test server -- --nocapture
 ```
+
+## Monitoring
+
+We have created a Grafana dashboard to monitor application deployed in k8s. Dashboard is exported and its JSON is saved in `server/monitoring` directory. As of now we monitor only CPU, Memory and network utilization metrics but in future we can add custom metrics like number of messages being processed by each topic, etc.
 
 ## Topic creation process
 
-A client can send a topic creation request to any broker in the cluster, all the brokers are equal. Whenever broker receives a request to create a new topic, it will first check if topic already exists in the clsuter or not. Each broker sends it's own metadata to other brokers as a `heartbeat` signal and receives the same information from other brokers. Topic names are case sensitve so MyTopic is NOT same as Mytopic and both can co-exist in the cluster.
+Client sends a topic creation request to any broker in the cluster - all the brokers are equal. Whenever broker receives a request to create a new topic, it will first check if topic already exists in the cluster or not. Each broker sends it's own metadata to other brokers as a `heartbeat` signal and receives the same information from other brokers. This metadata will be used while creating the topic.
 
-Each topic in the cluster has one `lead broker`. After checking existance of a topic, broker will check its cluster metadata to find a broker with minimum number of topics it owns.
+Topic names are case sensitve so MyTopic is NOT same as Mytopic and both can co-exist in the cluster.
+
+Cluster will create N partitions and each partition will have M replications. Values for N & M are provided by client. Each partition of the topic has one `lead broker`. After checking existance of a topic, broker will check its cluster metadata to find a broker with minimum number of topics it owns.
 After selecting the lead broker (lead broker can be the same broker which received the request in the first place), broker will do the following:
 
 - Find potential follower brokers by checking how many partitions that broker is serving
@@ -103,19 +112,22 @@ Tokio reader task will read next set of messages from the disk, send it to the b
     - [x] or when majority of nodes accept?
   - [x] How many times leader election should happen? infinitely?
 
-- Milestone 3: Client integration
-  - Understand how ISR work in Kafka and implement the functionality
-    - Implement ring buffer
+- Milestone 3:
+
+  - Make WAL persisting to underlying storage
+
+- Milestone 4: Client integration
+
   - Implement Client SDK (if possible write Python wrapper using Pyo3)
   - Deploy in k8s and test the results
-- Milestone 4:
-  - Implement WAL
-  - Make WAL persisting to underlying storage
+
 - Milestone 5:
+
   - Performance testing
     - Understand and learn how Kafka and RedPanda does stress and performance testing
     - Create same testing setup
     - Generate results
+
 - Milestone 6:
   - TBD
 
