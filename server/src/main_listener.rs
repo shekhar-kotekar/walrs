@@ -182,14 +182,11 @@ impl MainListener {
                 match rx.await {
                     Ok(response) => match response {
                         BrokerResponse::TopicInfo { topics } => AdminResponse::TopicInfo { topics },
-                        other => {
-                            AdminResponse::Error(format!("Unexpected response type: {:?}", other))
-                        }
+                        other => AdminResponse::Error(format!("Unexpected response: {:?}", other)),
                     },
-                    Err(err) => AdminResponse::Error(format!(
-                        "Failed to receive topic info response: {}",
-                        err
-                    )),
+                    Err(err) => {
+                        AdminResponse::Error(format!("topic info response not received: {}", err))
+                    }
                 }
             }
         }

@@ -28,8 +28,6 @@ pub struct Broker {
     //key: topic name, value: partition reader
     local_partition_readers: HashMap<String, mpsc::Sender<PartitionCommand>>,
 
-    // key: topic name, value: tuple of (Topic information, TopicStatus)
-    // registered_topics: HashMap<String, (Topic, TopicStatus)>,
     cluster_info: ClusterInfo,
 }
 
@@ -196,7 +194,7 @@ impl Broker {
         let key = format!("{}-{}", topic_name, partition_number);
         let response = if let Some(partition_tx) = self.local_partition_readers.get(&key) {
             tracing::debug!(
-                "Found partition reader for topic: {}, partition: {}",
+                "partition reader for topic: {}, partition: {}",
                 topic_name,
                 partition_number
             );
