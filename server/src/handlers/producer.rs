@@ -164,7 +164,8 @@ async fn send_metrics(
     partition: u8,
     message_count: usize,
 ) {
-    tokio::spawn(async move {
+    let topic_name = topic.clone();
+    match tokio::spawn(async move {
         let metrics: MetricEvent = MetricEvent::MessagesWritten {
             topic: topic.clone(),
             partition,
@@ -175,9 +176,15 @@ async fn send_metrics(
         });
     })
     .await
-    .unwrap_or_else(|err| {
-        tracing::error!("Failed to send metrics: {}", err);
-    });
+    {
+        Ok(_) => tracing::debug!(
+            "Metrics sent for topic: {}, partition: {}, message_count: {}",
+            topic_name,
+            partition,
+            message_count
+        ),
+        Err(err) => tracing::error!("Failed to send metrics for topic '{}': {}", topic_name, err),
+    }
 }
 
 async fn send_messages_to_follower(

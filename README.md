@@ -53,6 +53,8 @@ send-message -m second-message-for-topic-1 -t first-topic
 consume -t first-topic -p 0
 ```
 
+If you want to connect to debug pod then execute `kubectl exec -it ubuntu-debug-pod -n walrs -- bash`
+
 ## Unit testing
 
 ```
