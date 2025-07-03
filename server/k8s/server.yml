@@ -15,6 +15,10 @@ spec:
     metadata:
       labels:
         app: walrs-srvr
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9898"
+        prometheus.io/path: "/metrics"
     spec:
       containers:
         - name: walrs-server
