@@ -23,7 +23,7 @@ const TASK_TIMEOUT_SECONDS: u64 = 20;
 
 const MPSC_CHANNEL_SIZE: usize = 100;
 const PORT: u16 = 5056;
-const METRICS_PORT: u16 = 9898;
+const METRICS_PORT: u16 = 8000;
 
 #[tokio::main]
 async fn main() {
