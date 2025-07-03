@@ -12,11 +12,13 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use crate::{
     broker::{BrokerCommand, BrokerResponse},
     handlers::{consumer, peer, producer},
+    metrics::server::MetricEvent,
 };
 
 pub struct MainListener {
     pub address: String,
     pub broker_tx: mpsc::Sender<BrokerCommand>,
+    pub metrics_tx: mpsc::Sender<MetricEvent>,
 }
 
 impl MainListener {
@@ -36,8 +38,9 @@ impl MainListener {
                     let client_request_cancellation_token = cancellation_token.child_token();
                     let broker_tx_clone = self.broker_tx.clone();
                     let self_address = self.address.clone();
+                    let metrics_tx_clone = self.metrics_tx.clone();
                     task_tracker.spawn(async move {
-                        MainListener::process_request(stream, self_address, broker_tx_clone, client_request_cancellation_token).await;
+                        MainListener::process_request(stream, self_address, broker_tx_clone, metrics_tx_clone, client_request_cancellation_token).await;
                     });
                 }
             } => {
@@ -92,6 +95,7 @@ impl MainListener {
         mut stream: TcpStream,
         self_address: String,
         broker_tx: mpsc::Sender<BrokerCommand>,
+        metrics_tx: mpsc::Sender<MetricEvent>,
         cancellation_token: CancellationToken,
     ) {
         tokio::select! {
@@ -109,7 +113,7 @@ impl MainListener {
                                 WalrsResponse::Peer(peer::handle_peer_request(peer_command, broker_tx).await)
                             }
                             WalrsCommand::Producer(producer_command) => {
-                                WalrsResponse::Producer(producer::handle_producer_request(producer_command, &self_address, broker_tx).await)
+                                WalrsResponse::Producer(producer::handle_producer_request(producer_command, &self_address, broker_tx, metrics_tx).await)
                             }
                             WalrsCommand::Consumer(consumer_command) => {
                                 WalrsResponse::Consumer(consumer::handle_consumer_request(consumer_command, broker_tx).await)

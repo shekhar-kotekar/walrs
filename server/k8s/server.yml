@@ -26,6 +26,8 @@ spec:
           ports:
             - containerPort: 5056
               name: walrs-srvr-svc
+            - containerPort: 9898
+              name: metrics
           resources:
             requests:
               memory: "32Mi"

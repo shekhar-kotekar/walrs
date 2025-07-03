@@ -4,12 +4,14 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 use crate::{
     broker::{Broker, BrokerCommand},
+    metrics::server::{MetricEvent, MetricsServer},
     models::ClusterInfo,
 };
 
 mod broker;
 mod handlers;
 mod main_listener;
+mod metrics;
 mod models;
 mod partition_managers;
 mod topic_creation;
@@ -21,6 +23,7 @@ const TASK_TIMEOUT_SECONDS: u64 = 20;
 
 const MPSC_CHANNEL_SIZE: usize = 100;
 const PORT: u16 = 5056;
+const METRICS_PORT: u16 = 9898;
 
 #[tokio::main]
 async fn main() {
@@ -38,6 +41,17 @@ async fn main() {
     let (broker_tx, broker_rx) = mpsc::channel::<BrokerCommand>(MPSC_CHANNEL_SIZE);
     let broker_cancellation_token = cancellation_token.child_token();
 
+    // Start metrics server
+    let (metrics_tx, metrics_rx) = mpsc::channel::<MetricEvent>(MPSC_CHANNEL_SIZE);
+    let metrics_server = MetricsServer::new();
+    let metrics_cancellation_token = cancellation_token.child_token();
+
+    task_tracker.spawn(async move {
+        metrics_server
+            .start(metrics_rx, METRICS_PORT, metrics_cancellation_token)
+            .await;
+    });
+
     let heartbeat_interval_seconds = 300;
     let mut broker = Broker::new(
         DATA_DIR_PATH.to_string(),
@@ -47,10 +61,10 @@ async fn main() {
     task_tracker.spawn(async move {
         broker.start(broker_rx, broker_cancellation_token).await;
     });
-
     let main_listener = main_listener::MainListener {
         address: self_address.clone(),
         broker_tx,
+        metrics_tx,
     };
     main_listener.start(task_tracker, cancellation_token).await;
 
