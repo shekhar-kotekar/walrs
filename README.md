@@ -65,6 +65,13 @@ cargo test server -- --nocapture
 
 We have created a Grafana dashboard to monitor application deployed in k8s. Dashboard is exported and its JSON is saved in `server/monitoring` directory. As of now we monitor only CPU, Memory and network utilization metrics but in future we can add custom metrics like number of messages being processed by each topic, etc.
 
+### Steps to view dashboard
+
+1. Assumption is that Grafana and Prometheus is installed
+2. In case you are running Grafana in local k8s (kind, etc.) then we need to do k8s port-forward to reach the dashboard from outside the cluster.
+3. Make sure you are in correct k8s context and execute `kubectl port-forward service/grafana 3000:3000 -n monitoring`.
+4. Open http://localhost:3000 in browser to access grafana.
+
 ## Topic creation process
 
 Client sends a topic creation request to any broker in the cluster - all the brokers are equal. Whenever broker receives a request to create a new topic, it will first check if topic already exists in the cluster or not. Each broker sends it's own metadata to other brokers as a `heartbeat` signal and receives the same information from other brokers. This metadata will be used while creating the topic.
