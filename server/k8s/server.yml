@@ -7,7 +7,7 @@ metadata:
     app: walrs-srvr
 spec:
   serviceName: walrs-headless-service
-  replicas: 3
+  replicas: 10
   selector:
     matchLabels:
       app: walrs-srvr
@@ -15,6 +15,10 @@ spec:
     metadata:
       labels:
         app: walrs-srvr
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
     spec:
       containers:
         - name: walrs-server
@@ -22,6 +26,8 @@ spec:
           ports:
             - containerPort: 5056
               name: walrs-srvr-svc
+            - containerPort: 8000
+              name: metrics
           resources:
             requests:
               memory: "32Mi"
@@ -47,32 +53,9 @@ spec:
             - name: CLUSTER_DOMAIN
               value: "cluster.local"
             - name: REPLICA_COUNT
-              value: "3"
+              value: "10"
             - name: POD_NAME_PREFIX
               value: "walrs-srvr"
----
-kind: Pod
-apiVersion: v1
-metadata:
-  name: ubuntu-debug-pod
-  namespace: walrs
-  labels:
-    app: ubuntu-debug
-spec:
-  containers:
-    - image: ubuntu:latest
-      command:
-        - "sleep"
-        - "3600"
-      imagePullPolicy: IfNotPresent
-      name: ubuntu-debug
-      resources:
-        requests:
-          memory: "32Mi"
-          cpu: "250m"
-        limits:
-          memory: "128Mi"
-          cpu: "500m"
 ---
 kind: Service
 apiVersion: v1

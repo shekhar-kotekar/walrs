@@ -176,8 +176,9 @@ impl Broker {
                     heartbeat::send_heartbeat(self.cluster_info.clone())
                         .await
                         .unwrap_or_else(|err| {
-                            tracing::error!("Failed to send heartbeat: {}", err);
+                            tracing::error!("heartbeat not sent: {}", err);
                         });
+
                 }
             }
         }

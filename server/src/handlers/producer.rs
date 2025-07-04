@@ -10,6 +10,7 @@ use tokio::{
 
 use crate::{
     broker::{BrokerCommand, BrokerResponse},
+    metrics::server::MetricEvent,
     models::{PartitionCommand, PartitionWriterResponse},
     TASK_TIMEOUT_SECONDS,
 };
@@ -17,7 +18,8 @@ use crate::{
 pub async fn handle_producer_request(
     command: ProducerCommand,
     node_address: &str,
-    node_manager_tx: mpsc::Sender<BrokerCommand>,
+    broker_tx: mpsc::Sender<BrokerCommand>,
+    metrics_tx: mpsc::Sender<MetricEvent>,
 ) -> ProducerResponse {
     match command {
         ProducerCommand::WriteMessages {
@@ -31,7 +33,7 @@ pub async fn handle_producer_request(
             // it should return redirect response with the correct leader address.
             tracing::info!("Writing {} messages for: {}", messages.len(), topic);
             let (writer, topic_info) =
-                match get_info_from_broker(&topic, partition_number, node_manager_tx).await {
+                match get_info_from_broker(&topic, partition_number, broker_tx).await {
                     Ok((writer, topic_info)) => (writer, topic_info),
                     Err(err) => {
                         return ProducerResponse::Error {
@@ -136,27 +138,15 @@ pub async fn handle_producer_request(
                     })
                     .await;
                     if synced_peer_count == partition_info.followers.len() {
-                        tracing::info!(
-                            "Successfully synced messages to all {} followers for topic: {}, partition: {}",
-                            synced_peer_count,
-                            topic,
-                            partition_number
-                        );
+                        send_metrics(metrics_tx, topic, partition_number, message_count).await;
                         ProducerResponse::MessagesPersisted { count }
                     } else {
-                        tracing::warn!(
-                            "Only synced messages to {} out of {} followers for topic: {}, partition: {}",
-                            synced_peer_count,
-                            partition_info.followers.len(),
-                            topic,
-                            partition_number
-                        );
                         ProducerResponse::Error {
                             message: format!(
-                                "Failed to sync messages to all followers. Synced to {} out of {} followers.",
+                                "Failed to sync all followers. Synced to {} out of {} followers.",
                                 synced_peer_count,
                                 partition_info.followers.len()
-                            )
+                            ),
                         }
                     }
                 }
@@ -165,6 +155,35 @@ pub async fn handle_producer_request(
                 },
             }
         }
+    }
+}
+
+async fn send_metrics(
+    metrics_tx: mpsc::Sender<MetricEvent>,
+    topic: String,
+    partition: u8,
+    message_count: usize,
+) {
+    let topic_name = topic.clone();
+    match tokio::spawn(async move {
+        let metrics: MetricEvent = MetricEvent::MessagesWritten {
+            topic: topic.clone(),
+            partition,
+            message_count,
+        };
+        metrics_tx.send(metrics).await.unwrap_or_else(|err| {
+            tracing::error!("Failed to send metrics for topic '{}': {}", topic, err);
+        });
+    })
+    .await
+    {
+        Ok(_) => tracing::debug!(
+            "Metrics sent for topic: {}, partition: {}, message_count: {}",
+            topic_name,
+            partition,
+            message_count
+        ),
+        Err(err) => tracing::error!("Failed to send metrics for topic '{}': {}", topic_name, err),
     }
 }
 

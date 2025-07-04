@@ -46,6 +46,7 @@ deploy: set_kind_context
 	@echo "INFO: Deploying to ${k8s_context} k8s cluster\n"
 	kubectl apply -f ./server/k8s/temp/${GIT_COMMIT}/prerequisites.yml
 	kubectl apply -f ./server/k8s/temp/${GIT_COMMIT}/server.yml
+	kubectl apply -f ./server/k8s/debug_pod.yml
 
 	@echo "INFO: Deployed successfully!\n"
 	kubectl get pods --namespace=${PROJECT_NAME}
@@ -59,7 +60,7 @@ teardown: set_kind_context
 	@echo "INFO: Deleting deployment"
 	kubectl delete -f ./server/k8s/temp/${GIT_COMMIT}/server.yml
 	kubectl delete -f ./server/k8s/temp/${GIT_COMMIT}/prerequisites.yml
-
+	kubectl delete -f ./server/k8s/debug_pod.yml
 	rm -rf ./server/k8s/temp/${GIT_COMMIT}/
 
 	@echo "INFO: Deleted successfully!"

@@ -53,6 +53,8 @@ send-message -m second-message-for-topic-1 -t first-topic
 consume -t first-topic -p 0
 ```
 
+If you want to connect to debug pod then execute `kubectl exec -it ubuntu-debug-pod -n walrs -- bash`
+
 ## Unit testing
 
 ```
@@ -64,6 +66,13 @@ cargo test server -- --nocapture
 ## Monitoring
 
 We have created a Grafana dashboard to monitor application deployed in k8s. Dashboard is exported and its JSON is saved in `server/monitoring` directory. As of now we monitor only CPU, Memory and network utilization metrics but in future we can add custom metrics like number of messages being processed by each topic, etc.
+
+### Steps to view dashboard
+
+1. Assumption is that Grafana and Prometheus is installed
+2. In case you are running Grafana in local k8s (kind, etc.) then we need to do k8s port-forward to reach the dashboard from outside the cluster.
+3. Make sure you are in correct k8s context and execute `kubectl port-forward service/grafana 3000:3000 -n monitoring`.
+4. Open http://localhost:3000 in browser to access grafana.
 
 ## Topic creation process
 
