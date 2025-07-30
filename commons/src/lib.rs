@@ -107,11 +107,11 @@ pub async fn send_and_receive_peer_command(
         Ok(response) => match response {
             WalrsResponse::Peer(peer_response) => peer_response,
             response => PeerResponse::Error {
-                message: format!("Unexpected response type: {:?}", response),
+                message: format!("Unexpected response from peer: {:?}", response),
             },
         },
         Err(e) => PeerResponse::Error {
-            message: format!("Failed to send command: {}", e),
+            message: format!("Failed to send command to peer: {}", e),
         },
     }
 }

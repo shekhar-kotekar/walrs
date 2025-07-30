@@ -12,7 +12,7 @@ pub async fn send_heartbeat(cluster_info: ClusterInfo) -> Result<(), Error> {
     };
 
     let peer_addresses: Vec<_> = cluster_info.peers.keys().cloned().collect();
-
+    let peers_in_cluster = peer_addresses.len();
     peer_addresses.into_iter().for_each(|peer_address| {
         let heartbeat_message_clone = heartbeat_message.clone();
         task_join_set.spawn(async move {
@@ -27,8 +27,16 @@ pub async fn send_heartbeat(cluster_info: ClusterInfo) -> Result<(), Error> {
             tracing::info!("Heartbeat acknowledged by peer.");
             successful_heartbeats += 1;
         }
-        other => tracing::warn!("Unexpected response type: {:?}", other),
+        other => tracing::warn!("Unexpected response: {:?}", other),
     });
-    tracing::info!("Successful heartbeats: {}", successful_heartbeats);
+    if successful_heartbeats == peers_in_cluster {
+        tracing::info!("All peers acknowledged the heartbeat ♥️");
+    } else {
+        tracing::warn!(
+            "Only {}/{} peers acknowledged the heartbeat 💔",
+            successful_heartbeats,
+            peers_in_cluster
+        );
+    }
     Ok(())
 }
