@@ -24,9 +24,8 @@ pub struct MainListener {
 impl MainListener {
     pub async fn start(&self, task_tracker: TaskTracker, cancellation_token: CancellationToken) {
         tracing::info!("Starting main listener on: {}", self.address);
-        // let main_tcp_listener = TcpListener::bind(&self.address).await.unwrap();
         let main_tcp_listener = TcpListener::bind("0.0.0.0:5056").await.unwrap();
-        tracing::debug!("Listening on: {}", main_tcp_listener.local_addr().unwrap());
+        tracing::debug!("listening on: {}", main_tcp_listener.local_addr().unwrap());
 
         let mut sigterm: Signal =
             signal(SignalKind::terminate()).expect("Failed to create signal handler");
@@ -124,9 +123,7 @@ impl MainListener {
                             tracing::error!("Failed to write response to socket: {}", err);
                         });
                     }
-                    Err(err) => {
-                        tracing::error!("Failed to read command from socket: {}", err);
-                    }
+                    Err(err) => tracing::error!("Failed to read command from socket: {}", err)
                 }
             } => {
                 tracing::debug!("Client request processing completed.");
