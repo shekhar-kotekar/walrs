@@ -7,7 +7,7 @@ metadata:
     app: walrs-srvr
 spec:
   serviceName: walrs-headless-service
-  replicas: 2
+  replicas: 3
   selector:
     matchLabels:
       app: walrs-srvr
@@ -53,7 +53,7 @@ spec:
             - name: CLUSTER_DOMAIN
               value: "cluster.local"
             - name: REPLICA_COUNT
-              value: "10"
+              value: "3"
             - name: POD_NAME_PREFIX
               value: "walrs-srvr"
 ---

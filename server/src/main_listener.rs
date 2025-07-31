@@ -24,8 +24,9 @@ pub struct MainListener {
 impl MainListener {
     pub async fn start(&self, task_tracker: TaskTracker, cancellation_token: CancellationToken) {
         tracing::info!("Starting main listener on: {}", self.address);
+        // let main_tcp_listener = TcpListener::bind(&self.address).await.unwrap();
         let main_tcp_listener = TcpListener::bind("0.0.0.0:5056").await.unwrap();
-        tracing::debug!("listening on: {}", main_tcp_listener.local_addr().unwrap());
+        tracing::debug!("Listening on: {}", main_tcp_listener.local_addr().unwrap());
 
         let mut sigterm: Signal =
             signal(SignalKind::terminate()).expect("Failed to create signal handler");
@@ -54,23 +55,15 @@ impl MainListener {
             }
             _ = signal::ctrl_c() => {
                 tracing::info!("Received Ctrl-C signal. Cancelling all tasks.");
-
                 cancellation_token.cancel();
-                tracing::info!("Cancellation token cancelled.");
-
                 task_tracker.close();
-                tracing::info!("Task tracker closed.");
-
                 task_tracker.wait().await;
                 tracing::info!("Task tracker wait is over. All tasks cancelled.");
             }
             _ = self.terminate_signal() => {
                 tracing::info!("Received termination signal, shutting down server...");
                 cancellation_token.cancel();
-                tracing::info!("Cancellation token cancelled.");
                 task_tracker.close();
-                tracing::info!("Task tracker closed.");
-
                 task_tracker.wait().await;
                 tracing::info!("Task tracker wait is over. All tasks cancelled.");
             }
@@ -118,12 +111,13 @@ impl MainListener {
                                 WalrsResponse::Consumer(consumer::handle_consumer_request(consumer_command, broker_tx).await)
                             }
                         };
-                        tracing::info!("Sending response: {:?}", response);
+                        tracing::debug!("Sending response: {:?}", response);
                         commons::write_to_socket::<WalrsResponse>(&response, &mut stream).await.unwrap_or_else(|err| {
                             tracing::error!("Failed to write response to socket: {}", err);
                         });
                     }
                     Err(err) => tracing::error!("Failed to read command from socket: {}", err)
+
                 }
             } => {
                 tracing::debug!("Client request processing completed.");
