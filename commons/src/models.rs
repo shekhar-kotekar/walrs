@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, time::SystemTime};
 
 use bincode::{Decode, Encode};
 
@@ -220,10 +220,16 @@ pub struct Message {
 
 impl Message {
     pub fn new(payload: Vec<u8>) -> Self {
+        let mut headers = HashMap::new();
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_millis();
+        headers.insert("created_at".into(), vec![timestamp as u8]);
         Self {
             payload,
             key: None,
-            headers: HashMap::new(),
+            headers,
         }
     }
     pub fn with_key(mut self, key: String) -> Self {
@@ -245,18 +251,37 @@ mod tests {
         let message = Message::new(vec![1, 2, 3]);
         assert_eq!(message.payload, vec![1, 2, 3]);
         assert_eq!(message.key, None);
-        assert_eq!(message.headers, HashMap::new());
+        assert_eq!(message.headers.len(), 1);
+        assert_eq!(message.headers.contains_key("created_at"), true);
     }
 
     #[test]
     fn test_message_with_key() {
         let message = Message::new(vec![1, 2, 3]).with_key("test_key".into());
         assert_eq!(message.key, Some("test_key".into()));
+        assert_eq!(message.headers.len(), 1);
+        assert_eq!(message.headers.contains_key("created_at"), true);
     }
 
     #[test]
     fn test_message_with_header() {
         let message = Message::new(vec![1, 2, 3]).with_header("test_header".into(), vec![4, 5, 6]);
+        assert_eq!(message.headers.len(), 2);
         assert_eq!(message.headers.get("test_header"), Some(&vec![4, 5, 6]));
+        assert_eq!(message.headers.contains_key("created_at"), true);
+    }
+
+    #[test]
+    fn test_message_with_key_and_headers() {
+        let message = Message::new(vec![1, 2, 3])
+            .with_key("test_key".into())
+            .with_header("header_1".into(), vec![4, 5, 6])
+            .with_header("header_2".into(), vec![7, 8, 9]);
+
+        assert_eq!(message.key, Some("test_key".into()));
+        assert_eq!(message.headers.len(), 3);
+        assert_eq!(message.headers.get("header_1"), Some(&vec![4, 5, 6]));
+        assert_eq!(message.headers.get("header_2"), Some(&vec![7, 8, 9]));
+        assert_eq!(message.headers.contains_key("created_at"), true);
     }
 }
