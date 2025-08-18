@@ -1,4 +1,4 @@
-k8s_context := kind-kind
+k8s_context := kind
 IMAGE_REGISTRY := localhost:5001
 export PROJECT_NAME := walrs
 export GIT_COMMIT := $(shell git rev-parse --short HEAD)
