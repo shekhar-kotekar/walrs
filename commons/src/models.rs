@@ -215,5 +215,48 @@ pub struct Message {
     // they can only be accessed through the constructor and we can validate each field
     pub payload: Vec<u8>,
     pub key: Option<String>,
-    pub headers: HashMap<String, String>,
+    pub headers: HashMap<String, Vec<u8>>,
+}
+
+impl Message {
+    pub fn new(payload: Vec<u8>) -> Self {
+        Self {
+            payload,
+            key: None,
+            headers: HashMap::new(),
+        }
+    }
+    pub fn with_key(mut self, key: String) -> Self {
+        self.key = Some(key);
+        self
+    }
+    pub fn with_header(mut self, key: String, value: Vec<u8>) -> Self {
+        self.headers.insert(key, value);
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_message_creation() {
+        let message = Message::new(vec![1, 2, 3]);
+        assert_eq!(message.payload, vec![1, 2, 3]);
+        assert_eq!(message.key, None);
+        assert_eq!(message.headers, HashMap::new());
+    }
+
+    #[test]
+    fn test_message_with_key() {
+        let message = Message::new(vec![1, 2, 3]).with_key("test_key".into());
+        assert_eq!(message.key, Some("test_key".into()));
+    }
+
+    #[test]
+    fn test_message_with_header() {
+        let message = Message::new(vec![1, 2, 3]).with_header("test_header".into(), vec![4, 5, 6]);
+        assert_eq!(message.headers.get("test_header"), Some(&vec![4, 5, 6]));
+    }
 }
