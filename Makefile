@@ -59,8 +59,8 @@ redeploy: replace_environment_variables
 teardown: set_kind_context
 	@echo "INFO: Deleting deployment"
 	kubectl delete -f ./server/k8s/temp/${GIT_COMMIT}/server.yml
-	kubectl delete -f ./server/k8s/temp/${GIT_COMMIT}/prerequisites.yml
 	kubectl delete -f ./server/k8s/debug_pod.yml
+	kubectl delete -f ./server/k8s/temp/${GIT_COMMIT}/prerequisites.yml
 	rm -rf ./server/k8s/temp/*
 
 	@echo "INFO: Deleted successfully!"
