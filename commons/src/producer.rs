@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
     hash::{DefaultHasher, Hash, Hasher},
-    io::{Error, ErrorKind},
+    io::Error,
 };
 
 use crate::{
@@ -67,10 +67,10 @@ impl Producer {
                         total_message_persisted += count;
                     }
                     other => {
-                        return Err(Error::new(
-                            ErrorKind::Other,
-                            format!("Failed to send messages to {}: {:?}", node_address, other),
-                        ));
+                        return Err(Error::other(format!(
+                            "Failed to send messages to {}: {:?}",
+                            node_address, other
+                        )));
                     }
                 }
             }
@@ -187,11 +187,11 @@ impl Producer {
             AdminResponse::TopicInfo { topics } => {
                 Ok(topics.into_iter().map(|t| (t.name.clone(), t)).collect())
             }
-            AdminResponse::Error(err) => Err(std::io::Error::new(std::io::ErrorKind::Other, err)),
-            other => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Unexpected response type: {:?}", other),
-            )),
+            AdminResponse::Error(err) => Err(Error::other(err)),
+            other => Err(Error::other(format!(
+                "Unexpected response type: {:?}",
+                other
+            ))),
         }
     }
 }

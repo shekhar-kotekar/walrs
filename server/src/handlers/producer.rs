@@ -219,10 +219,10 @@ async fn get_info_from_broker(
         tx: oneshot_tx,
     };
     if let Err(err) = node_manager_tx.send(command).await {
-        return Err(Error::new(
-            ErrorKind::Other,
-            format!("Failed to send command to node manager: {}", err),
-        ));
+        return Err(Error::other(format!(
+            "Failed to send command to node manager: {}",
+            err
+        )));
     }
     match oneshot_rx.await {
         Ok(BrokerResponse::PartitionWriter { writer }) => {
@@ -232,13 +232,10 @@ async fn get_info_from_broker(
                 broker_response_tx: oneshot_tx,
             };
             if let Err(err) = node_manager_tx.send(get_topic_info_command).await {
-                return Err(Error::new(
-                    ErrorKind::Other,
-                    format!(
-                        "Failed to send GetTopicInfo command to node manager: {}",
-                        err
-                    ),
-                ));
+                return Err(Error::other(format!(
+                    "Failed to send GetTopicInfo command to node manager: {}",
+                    err
+                )));
             }
             match oneshot_rx.await {
                 Ok(BrokerResponse::TopicInfo { topics }) => {
@@ -251,24 +248,18 @@ async fn get_info_from_broker(
                         ))
                     }
                 }
-                Ok(other) => Err(Error::new(
-                    ErrorKind::Other,
-                    format!("Broker error: {:?}", other),
-                )),
-                Err(err) => Err(Error::new(
-                    ErrorKind::Other,
-                    format!("Failed to receive response from broker: {}", err),
-                )),
+                Ok(other) => Err(Error::other(format!("Broker error: {:?}", other))),
+                Err(err) => Err(Error::other(format!(
+                    "Failed to receive response from broker: {}",
+                    err
+                ))),
             }
         }
-        Ok(other) => Err(Error::new(
-            ErrorKind::Other,
-            format!("Broker error: {:?}", other),
-        )),
-        Err(err) => Err(Error::new(
-            ErrorKind::Other,
-            format!("Failed to receive response from broker: {}", err),
-        )),
+        Ok(other) => Err(Error::other(format!("Broker error: {:?}", other))),
+        Err(err) => Err(Error::other(format!(
+            "Failed to receive response from broker: {}",
+            err
+        ))),
     }
 }
 

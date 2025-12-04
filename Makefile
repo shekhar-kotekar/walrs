@@ -12,11 +12,11 @@ build:
 	# --progress plain \
 	# --platform linux/amd64,linux/arm64 -t walrs_server:latest .
 	@echo "DEBUG: GIT_COMMIT = ${GIT_COMMIT}"
-	@docker buildx build --platform linux/arm64 -t ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT} .
-	@docker images
+	@podman buildx build --platform linux/arm64 -t ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT} .
+	@podman images
 
 push_image: set_kind_context build
-	docker push ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT}
+	podman push --tls-verify=false ${IMAGE_REGISTRY}/${PROJECT_NAME}:${GIT_COMMIT}
 
 replace_environment_variables: set_kind_context
 	@echo "INFO: Replacing environment variables in k8s deployment file"
@@ -61,7 +61,7 @@ teardown: set_kind_context
 	kubectl delete -f ./server/k8s/temp/${GIT_COMMIT}/server.yml
 	kubectl delete -f ./server/k8s/temp/${GIT_COMMIT}/prerequisites.yml
 	kubectl delete -f ./server/k8s/debug_pod.yml
-	rm -rf ./server/k8s/temp/${GIT_COMMIT}/
+	rm -rf ./server/k8s/temp/*
 
 	@echo "INFO: Deleted successfully!"
 	kubectl get namespaces

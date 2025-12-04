@@ -6,4 +6,4 @@
 *.log
 .DS_Store
 
-server/k8s/temp/*
+server/k8s/temp/

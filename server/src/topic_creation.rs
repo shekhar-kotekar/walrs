@@ -1,4 +1,4 @@
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 
 use commons::models::{PartitionInfo, PeerResponse, Topic, TopicStatus};
 use tokio::{sync::mpsc, task::JoinSet};
@@ -136,10 +136,10 @@ pub async fn create_topic(
                     );
                 }
                 PeerResponse::Error { message } => {
-                    return Err(Error::new(
-                        ErrorKind::Other,
-                        format!("Failed to create partition: {}", message),
-                    ));
+                    return Err(Error::other(format!(
+                        "Failed to create partition: {}",
+                        message
+                    )));
                 }
                 other => {
                     tracing::warn!("Unexpected response type: {:?}", other);

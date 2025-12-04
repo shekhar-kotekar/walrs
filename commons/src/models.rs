@@ -1,6 +1,7 @@
 use std::{collections::HashMap, str::FromStr, time::SystemTime};
 
 use bincode::{Decode, Encode};
+use serde::Serialize;
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq)]
 pub struct PartitionInfo {
@@ -209,7 +210,7 @@ pub enum PeerResponse {
     HeartbeatAcknowledged,
 }
 
-#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+#[derive(Clone, Debug, Encode, Decode, PartialEq, Serialize)]
 pub struct Message {
     //TODO: Make these fields private so that
     // they can only be accessed through the constructor and we can validate each field
@@ -223,7 +224,7 @@ impl Message {
         let mut headers = HashMap::new();
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("Time went backwards")
+            .expect("Invalid timestamp. Time went backwards.")
             .as_millis();
         headers.insert("created_at".into(), vec![timestamp as u8]);
         Self {

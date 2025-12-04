@@ -1,4 +1,4 @@
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 
 use commons::models::{Message, PartitionInfo, PartitionRole, PeerCommand, PeerResponse};
 use tokio::fs::File;
@@ -261,17 +261,14 @@ pub async fn create_local_leader_partition(
                     );
                 }
                 other => {
-                    return Err(std::io::Error::new(
-                        ErrorKind::Other,
-                        format!("Unexpected response: {:?}", other),
-                    ));
+                    return Err(Error::other(format!("Unexpected response: {:?}", other)));
                 }
             },
             Err(join_error) => {
-                return Err(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!("Follower partition creation failed: {}", join_error),
-                ));
+                return Err(Error::other(format!(
+                    "Follower partition creation failed: {}",
+                    join_error
+                )));
             }
         }
     }

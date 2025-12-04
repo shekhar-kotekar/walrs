@@ -218,11 +218,11 @@ impl CliManager {
                 }
                 println!("Sending message: {} to topic: {}", message, topic);
                 let mut producer: Producer = Producer::new(self.brokers.clone());
-                let message: Message = Message {
-                    payload: message.as_bytes().to_vec(),
-                    key: None,
-                    headers: HashMap::new(),
-                };
+                let message: Message = Message::new(message.as_bytes().to_vec());
+                tracing::debug!(
+                    "Sending message: {:?}",
+                    serde_json::to_string_pretty(&message)
+                );
                 producer.send(topic, &message);
                 match producer.flush(self.debug_mode_mapped_brokers.clone()).await {
                     Ok(response) => match response {
