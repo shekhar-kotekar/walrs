@@ -35,6 +35,9 @@ spec:
             limits:
               memory: "128Mi"
               cpu: "500m"
+          volumeMounts:
+            - name: walrs-data
+              mountPath: /data
           env:
             - name: POD_IP
               valueFrom:
@@ -48,6 +51,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: REPLICA_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['statefulset.kubernetes.io/pod-index']
             - name: SERVICE_NAME
               value: "walrs-headless-service"
             - name: CLUSTER_DOMAIN
@@ -56,6 +63,11 @@ spec:
               value: "3"
             - name: POD_NAME_PREFIX
               value: "walrs-srvr"
+      volumes:
+        - name: walrs-data
+          hostPath:
+            path: /tmp/walrs-data
+            type: DirectoryOrCreate
 ---
 kind: Service
 apiVersion: v1
